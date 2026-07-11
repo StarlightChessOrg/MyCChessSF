@@ -61,13 +61,13 @@ char piece_to_fen_char(BYTE pc) {
   return BLK[t];
 }
 
-std::string position_to_fen(const PositionStruct &pos) {
+std::string position_to_fen(const PositionStruct &pst) {
   std::string fen;
   for (int y = 0; y < 10; ++y) {
     int empty = 0;
     for (int x = 0; x < 9; ++x) {
       int sq = COORD_XY_ICCS(x, y);
-      BYTE pc = pos.ucpcSquares[sq];
+      BYTE pc = pst.ucpcSquares[sq];
       if (!pc) {
         ++empty;
         continue;
@@ -83,7 +83,7 @@ std::string position_to_fen(const PositionStruct &pos) {
     if (y < 9)
       fen += '/';
   }
-  fen += (pos.sdPlayer == 0) ? " w - - 0 1" : " b - - 0 1";
+  fen += (pst.sdPlayer == 0) ? " w - - 0 1" : " b - - 0 1";
   return fen;
 }
 
@@ -92,22 +92,22 @@ std::string position_to_fen(const PositionStruct &pos) {
 namespace py = pybind11;
 
 struct XQWLPosition {
-  PositionStruct pos{};
+  PositionStruct board{};
 
   XQWLPosition() { reset(); }
 
-  void reset() { pos.Startup(); }
+  void reset() { board.Startup(); }
 
   std::vector<int> legal_moves_mv() const {
     int mvs[MAX_GEN_MOVES];
-    int n = pos.GenerateMoves(mvs, FALSE);
+    int n = board.GenerateMoves(mvs, FALSE);
     if (n > MAX_GEN_MOVES) {
       n = MAX_GEN_MOVES;
     }
     std::vector<int> out;
     out.reserve(static_cast<size_t>(n));
     for (int i = 0; i < n; ++i) {
-      PositionStruct trial = pos;
+      PositionStruct trial = board;
       if (trial.MakeMove(mvs[i])) {
         out.push_back(mvs[i]);
       }
@@ -124,55 +124,55 @@ struct XQWLPosition {
     return s;
   }
 
-  bool make_move_mv(int mv) { return pos.MakeMove(mv); }
+  bool make_move_mv(int mv) { return board.MakeMove(mv); }
 
   bool make_move_iccs(const std::string &iccs) {
     auto mv = iccs_to_move(iccs);
     if (!mv)
       return false;
-    return pos.MakeMove(*mv);
+    return board.MakeMove(*mv);
   }
 
-  void undo() { pos.UndoMakeMove(); }
+  void undo() { board.UndoMakeMove(); }
 
-  bool in_check() const { return pos.InCheck(); }
+  bool in_check() const { return board.InCheck(); }
 
-  int rep_status(int n_recur = 3) const { return pos.RepStatus(n_recur); }
+  int rep_status(int n_recur = 3) const { return board.RepStatus(n_recur); }
 
-  int rep_value(int st) const { return pos.RepValue(st); }
+  int rep_value(int st) const { return board.RepValue(st); }
 
-  int ply_count() const { return pos.nMoveNum; }
+  int ply_count() const { return board.nMoveNum; }
 
   bool is_mate() const {
-    PositionStruct trial = pos;
+    PositionStruct trial = board;
     return trial.IsMate() != 0;
   }
 
   int terminal_kind() const {
     if (is_mate())
       return 1;
-    int rs = pos.RepStatus(3);
+    int rs = board.RepStatus(3);
     if (rs > 0)
       return 2;
-    if (pos.nMoveNum > 100)
+    if (board.nMoveNum > 100)
       return 3;
     return 0;
   }
 
   int rep_value_if_any() const {
-    int rs = pos.RepStatus(3);
+    int rs = board.RepStatus(3);
     if (rs > 0)
-      return pos.RepValue(rs);
+      return board.RepValue(rs);
     return 0;
   }
 
-  std::string fen() const { return position_to_fen(pos); }
+  std::string fen() const { return position_to_fen(board); }
 
-  int side_to_move() const { return pos.sdPlayer; }
+  int side_to_move() const { return board.sdPlayer; }
 
   XQWLPosition copy() const {
     XQWLPosition q;
-    q.pos = pos;
+    q.board = board;
     return q;
   }
 };
@@ -185,7 +185,7 @@ struct XQWLEngine {
   int book_size() const { return tab.nBookSize; }
 
   std::string search_best_iccs(const XQWLPosition &position, int time_ms = 1000, bool use_book = true) {
-    PositionStruct work = position.pos;
+    PositionStruct work = position.board;
     const int mv = XqwlSearchBestMove(work, tab, time_ms, use_book);
     if (mv == 0)
       return "";
@@ -193,7 +193,7 @@ struct XQWLEngine {
   }
 
   int search_best_mv(const XQWLPosition &position, int time_ms = 1000, bool use_book = true) {
-    PositionStruct work = position.pos;
+    PositionStruct work = position.board;
     return XqwlSearchBestMove(work, tab, time_ms, use_book);
   }
 };

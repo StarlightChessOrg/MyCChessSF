@@ -40,8 +40,8 @@ static thread_local XqwlSearchCtx *g_xqwl_sc = nullptr;
 inline PositionStruct &xqwl_pos() { return *g_xqwl_sc->pos; }
 inline XqwlSearchTables &xqwl_tab() { return *g_xqwl_sc->tab; }
 
-#define pos xqwl_pos()
-#define Search xqwl_tab()
+#define XQWL_SEARCH_POS (xqwl_pos())
+#define XQWL_SEARCH_TAB (xqwl_tab())
 
 static void XqwlLoadBookFromFile(const char *path, XqwlSearchTables &srch) {
   srch.nBookSize = 0;
@@ -86,31 +86,31 @@ static int SearchBook(void) {
   BookItem bkToSearch, *lpbk;
   PositionStruct posMirror;
 
-  if (Search.nBookSize == 0) {
+  if (XQWL_SEARCH_TAB.nBookSize == 0) {
     return 0;
   }
   bMirror = FALSE;
-  bkToSearch.dwLock = pos.zobr.dwLock1;
+  bkToSearch.dwLock = XQWL_SEARCH_POS.zobr.dwLock1;
   lpbk = static_cast<BookItem *>(
-      bsearch(&bkToSearch, Search.BookTable, static_cast<size_t>(Search.nBookSize), sizeof(BookItem), CompareBook));
+      bsearch(&bkToSearch, XQWL_SEARCH_TAB.BookTable, static_cast<size_t>(XQWL_SEARCH_TAB.nBookSize), sizeof(BookItem), CompareBook));
   if (lpbk == nullptr) {
     bMirror = TRUE;
-    pos.Mirror(posMirror);
+    XQWL_SEARCH_POS.Mirror(posMirror);
     bkToSearch.dwLock = posMirror.zobr.dwLock1;
     lpbk = static_cast<BookItem *>(bsearch(
-        &bkToSearch, Search.BookTable, static_cast<size_t>(Search.nBookSize), sizeof(BookItem), CompareBook));
+        &bkToSearch, XQWL_SEARCH_TAB.BookTable, static_cast<size_t>(XQWL_SEARCH_TAB.nBookSize), sizeof(BookItem), CompareBook));
   }
   if (lpbk == nullptr) {
     return 0;
   }
-  while (lpbk >= Search.BookTable && lpbk->dwLock == bkToSearch.dwLock) {
+  while (lpbk >= XQWL_SEARCH_TAB.BookTable && lpbk->dwLock == bkToSearch.dwLock) {
     lpbk--;
   }
   lpbk++;
   vl = nBookMoves = 0;
-  while (lpbk < Search.BookTable + Search.nBookSize && lpbk->dwLock == bkToSearch.dwLock) {
+  while (lpbk < XQWL_SEARCH_TAB.BookTable + XQWL_SEARCH_TAB.nBookSize && lpbk->dwLock == bkToSearch.dwLock) {
     mv = (bMirror ? MIRROR_MOVE(lpbk->wmv) : lpbk->wmv);
-    if (pos.LegalMove(mv)) {
+    if (XQWL_SEARCH_POS.LegalMove(mv)) {
       mvs[nBookMoves] = mv;
       vls[nBookMoves] = lpbk->wvl;
       vl += vls[nBookMoves];
@@ -138,8 +138,8 @@ static int ProbeHash(int vlAlpha, int vlBeta, int nDepth, int &mv) {
   BOOL bMate;
   HashItem hsh;
 
-  hsh = Search.HashTable[pos.zobr.dwKey & (HASH_SIZE - 1)];
-  if (hsh.dwLock0 != pos.zobr.dwLock0 || hsh.dwLock1 != pos.zobr.dwLock1) {
+  hsh = XQWL_SEARCH_TAB.HashTable[XQWL_SEARCH_POS.zobr.dwKey & (HASH_SIZE - 1)];
+  if (hsh.dwLock0 != XQWL_SEARCH_POS.zobr.dwLock0 || hsh.dwLock1 != XQWL_SEARCH_POS.zobr.dwLock1) {
     mv = 0;
     return -MATE_VALUE;
   }
@@ -149,13 +149,13 @@ static int ProbeHash(int vlAlpha, int vlBeta, int nDepth, int &mv) {
     if (hsh.svl < BAN_VALUE) {
       return -MATE_VALUE;
     }
-    hsh.svl -= pos.nDistance;
+    hsh.svl -= XQWL_SEARCH_POS.nDistance;
     bMate = TRUE;
   } else if (hsh.svl < -WIN_VALUE) {
     if (hsh.svl > -BAN_VALUE) {
       return -MATE_VALUE;
     }
-    hsh.svl += pos.nDistance;
+    hsh.svl += XQWL_SEARCH_POS.nDistance;
     bMate = TRUE;
   }
   if (hsh.ucDepth >= nDepth || bMate) {
@@ -171,7 +171,7 @@ static int ProbeHash(int vlAlpha, int vlBeta, int nDepth, int &mv) {
 
 static void RecordHash(int nFlag, int vl, int nDepth, int mv) {
   HashItem hsh;
-  hsh = Search.HashTable[pos.zobr.dwKey & (HASH_SIZE - 1)];
+  hsh = XQWL_SEARCH_TAB.HashTable[XQWL_SEARCH_POS.zobr.dwKey & (HASH_SIZE - 1)];
   if (hsh.ucDepth > nDepth) {
     return;
   }
@@ -181,26 +181,26 @@ static void RecordHash(int nFlag, int vl, int nDepth, int mv) {
     if (mv == 0 && vl <= BAN_VALUE) {
       return;
     }
-    hsh.svl = static_cast<short>(vl + pos.nDistance);
+    hsh.svl = static_cast<short>(vl + XQWL_SEARCH_POS.nDistance);
   } else if (vl < -WIN_VALUE) {
     if (mv == 0 && vl >= -BAN_VALUE) {
       return;
     }
-    hsh.svl = static_cast<short>(vl - pos.nDistance);
+    hsh.svl = static_cast<short>(vl - XQWL_SEARCH_POS.nDistance);
   } else {
     hsh.svl = static_cast<short>(vl);
   }
   hsh.wmv = static_cast<WORD>(mv);
-  hsh.dwLock0 = pos.zobr.dwLock0;
-  hsh.dwLock1 = pos.zobr.dwLock1;
-  Search.HashTable[pos.zobr.dwKey & (HASH_SIZE - 1)] = hsh;
+  hsh.dwLock0 = XQWL_SEARCH_POS.zobr.dwLock0;
+  hsh.dwLock1 = XQWL_SEARCH_POS.zobr.dwLock1;
+  XQWL_SEARCH_TAB.HashTable[XQWL_SEARCH_POS.zobr.dwKey & (HASH_SIZE - 1)] = hsh;
 }
 
 static BYTE cucMvvLva[24] = {
     0, 0, 0, 0, 0, 0, 0, 0, 5, 1, 1, 3, 4, 3, 2, 0, 5, 1, 1, 3, 4, 3, 2, 0};
 
 inline int MvvLva(int mv) {
-  return (cucMvvLva[pos.ucpcSquares[DST(mv)]] << 3) - cucMvvLva[pos.ucpcSquares[SRC(mv)]];
+  return (cucMvvLva[XQWL_SEARCH_POS.ucpcSquares[DST(mv)]] << 3) - cucMvvLva[XQWL_SEARCH_POS.ucpcSquares[SRC(mv)]];
 }
 
 static int CompareMvvLva(const void *lpmv1, const void *lpmv2) {
@@ -208,8 +208,8 @@ static int CompareMvvLva(const void *lpmv1, const void *lpmv2) {
 }
 
 static int CompareHistory(const void *lpmv1, const void *lpmv2) {
-  return Search.nHistoryTable[*static_cast<const int *>(lpmv2)] -
-         Search.nHistoryTable[*static_cast<const int *>(lpmv1)];
+  return XQWL_SEARCH_TAB.nHistoryTable[*static_cast<const int *>(lpmv2)] -
+         XQWL_SEARCH_TAB.nHistoryTable[*static_cast<const int *>(lpmv1)];
 }
 
 const int PHASE_HASH = 0;
@@ -225,8 +225,8 @@ struct SortStruct {
 
   void Init(int mvHash_) {
     mvHash = mvHash_;
-    mvKiller1 = Search.mvKillers[pos.nDistance][0];
-    mvKiller2 = Search.mvKillers[pos.nDistance][1];
+    mvKiller1 = XQWL_SEARCH_TAB.mvKillers[XQWL_SEARCH_POS.nDistance][0];
+    mvKiller2 = XQWL_SEARCH_TAB.mvKillers[XQWL_SEARCH_POS.nDistance][1];
     nPhase = PHASE_HASH;
   }
   int Next(void);
@@ -242,17 +242,17 @@ int SortStruct::Next(void) {
     }
   case PHASE_KILLER_1:
     nPhase = PHASE_KILLER_2;
-    if (mvKiller1 != mvHash && mvKiller1 != 0 && pos.LegalMove(mvKiller1)) {
+    if (mvKiller1 != mvHash && mvKiller1 != 0 && XQWL_SEARCH_POS.LegalMove(mvKiller1)) {
       return mvKiller1;
     }
   case PHASE_KILLER_2:
     nPhase = PHASE_GEN_MOVES;
-    if (mvKiller2 != mvHash && mvKiller2 != 0 && pos.LegalMove(mvKiller2)) {
+    if (mvKiller2 != mvHash && mvKiller2 != 0 && XQWL_SEARCH_POS.LegalMove(mvKiller2)) {
       return mvKiller2;
     }
   case PHASE_GEN_MOVES:
     nPhase = PHASE_REST;
-    nGenMoves = pos.GenerateMoves(mvs);
+    nGenMoves = XQWL_SEARCH_POS.GenerateMoves(mvs);
     qsort(mvs, static_cast<size_t>(nGenMoves), sizeof(int), CompareHistory);
     nIndex = 0;
   case PHASE_REST:
@@ -270,8 +270,8 @@ int SortStruct::Next(void) {
 
 inline void SetBestMove(int mv, int nDepth) {
   int *lpmvKillers;
-  Search.nHistoryTable[mv] += nDepth * nDepth;
-  lpmvKillers = Search.mvKillers[pos.nDistance];
+  XQWL_SEARCH_TAB.nHistoryTable[mv] += nDepth * nDepth;
+  lpmvKillers = XQWL_SEARCH_TAB.mvKillers[XQWL_SEARCH_POS.nDistance];
   if (lpmvKillers[0] != mv) {
     lpmvKillers[1] = lpmvKillers[0];
     lpmvKillers[0] = mv;
@@ -283,20 +283,20 @@ static int SearchQuiesc(int vlAlpha, int vlBeta) {
   int vl, vlBest;
   int mvs[MAX_GEN_MOVES];
 
-  vl = pos.RepStatus();
+  vl = XQWL_SEARCH_POS.RepStatus();
   if (vl != 0) {
-    return pos.RepValue(vl);
+    return XQWL_SEARCH_POS.RepValue(vl);
   }
-  if (pos.nDistance == LIMIT_DEPTH) {
-    return pos.Evaluate();
+  if (XQWL_SEARCH_POS.nDistance == LIMIT_DEPTH) {
+    return XQWL_SEARCH_POS.Evaluate();
   }
   vlBest = -MATE_VALUE;
 
-  if (pos.InCheck()) {
-    nGenMoves = pos.GenerateMoves(mvs);
+  if (XQWL_SEARCH_POS.InCheck()) {
+    nGenMoves = XQWL_SEARCH_POS.GenerateMoves(mvs);
     qsort(mvs, static_cast<size_t>(nGenMoves), sizeof(int), CompareHistory);
   } else {
-    vl = pos.Evaluate();
+    vl = XQWL_SEARCH_POS.Evaluate();
     if (vl > vlBest) {
       vlBest = vl;
       if (vl >= vlBeta) {
@@ -306,14 +306,14 @@ static int SearchQuiesc(int vlAlpha, int vlBeta) {
         vlAlpha = vl;
       }
     }
-    nGenMoves = pos.GenerateMoves(mvs, GEN_CAPTURE);
+    nGenMoves = XQWL_SEARCH_POS.GenerateMoves(mvs, GEN_CAPTURE);
     qsort(mvs, static_cast<size_t>(nGenMoves), sizeof(int), CompareMvvLva);
   }
 
   for (i = 0; i < nGenMoves; i++) {
-    if (pos.MakeMove(mvs[i])) {
+    if (XQWL_SEARCH_POS.MakeMove(mvs[i])) {
       vl = -SearchQuiesc(-vlBeta, -vlAlpha);
-      pos.UndoMakeMove();
+      XQWL_SEARCH_POS.UndoMakeMove();
       if (vl > vlBest) {
         vlBest = vl;
         if (vl >= vlBeta) {
@@ -325,7 +325,7 @@ static int SearchQuiesc(int vlAlpha, int vlBeta) {
       }
     }
   }
-  return vlBest == -MATE_VALUE ? pos.nDistance - MATE_VALUE : vlBest;
+  return vlBest == -MATE_VALUE ? XQWL_SEARCH_POS.nDistance - MATE_VALUE : vlBest;
 }
 
 const BOOL NO_NULL = TRUE;
@@ -338,21 +338,21 @@ static int SearchFull(int vlAlpha, int vlBeta, int nDepth, BOOL bNoNull = FALSE)
   if (nDepth <= 0) {
     return SearchQuiesc(vlAlpha, vlBeta);
   }
-  vl = pos.RepStatus();
+  vl = XQWL_SEARCH_POS.RepStatus();
   if (vl != 0) {
-    return pos.RepValue(vl);
+    return XQWL_SEARCH_POS.RepValue(vl);
   }
-  if (pos.nDistance == LIMIT_DEPTH) {
-    return pos.Evaluate();
+  if (XQWL_SEARCH_POS.nDistance == LIMIT_DEPTH) {
+    return XQWL_SEARCH_POS.Evaluate();
   }
   vl = ProbeHash(vlAlpha, vlBeta, nDepth, mvHash);
   if (vl > -MATE_VALUE) {
     return vl;
   }
-  if (!bNoNull && !pos.InCheck() && pos.NullOkay()) {
-    pos.NullMove();
+  if (!bNoNull && !XQWL_SEARCH_POS.InCheck() && XQWL_SEARCH_POS.NullOkay()) {
+    XQWL_SEARCH_POS.NullMove();
     vl = -SearchFull(-vlBeta, 1 - vlBeta, nDepth - NULL_DEPTH - 1, NO_NULL);
-    pos.UndoNullMove();
+    XQWL_SEARCH_POS.UndoNullMove();
     if (vl >= vlBeta) {
       return vl;
     }
@@ -362,8 +362,8 @@ static int SearchFull(int vlAlpha, int vlBeta, int nDepth, BOOL bNoNull = FALSE)
   mvBest = 0;
   Sort.Init(mvHash);
   while ((mv = Sort.Next()) != 0) {
-    if (pos.MakeMove(mv)) {
-      nNewDepth = pos.InCheck() ? nDepth : nDepth - 1;
+    if (XQWL_SEARCH_POS.MakeMove(mv)) {
+      nNewDepth = XQWL_SEARCH_POS.InCheck() ? nDepth : nDepth - 1;
       if (vlBest == -MATE_VALUE) {
         vl = -SearchFull(-vlBeta, -vlAlpha, nNewDepth);
       } else {
@@ -372,7 +372,7 @@ static int SearchFull(int vlAlpha, int vlBeta, int nDepth, BOOL bNoNull = FALSE)
           vl = -SearchFull(-vlBeta, -vlAlpha, nNewDepth);
         }
       }
-      pos.UndoMakeMove();
+      XQWL_SEARCH_POS.UndoMakeMove();
       if (vl > vlBest) {
         vlBest = vl;
         if (vl >= vlBeta) {
@@ -389,7 +389,7 @@ static int SearchFull(int vlAlpha, int vlBeta, int nDepth, BOOL bNoNull = FALSE)
     }
   }
   if (vlBest == -MATE_VALUE) {
-    return pos.nDistance - MATE_VALUE;
+    return XQWL_SEARCH_POS.nDistance - MATE_VALUE;
   }
   RecordHash(nHashFlag, vlBest, nDepth, mvBest);
   if (mvBest != 0) {
@@ -403,10 +403,10 @@ static int SearchRoot(int nDepth) {
   SortStruct Sort;
 
   vlBest = -MATE_VALUE;
-  Sort.Init(Search.mvResult);
+  Sort.Init(XQWL_SEARCH_TAB.mvResult);
   while ((mv = Sort.Next()) != 0) {
-    if (pos.MakeMove(mv)) {
-      nNewDepth = pos.InCheck() ? nDepth : nDepth - 1;
+    if (XQWL_SEARCH_POS.MakeMove(mv)) {
+      nNewDepth = XQWL_SEARCH_POS.InCheck() ? nDepth : nDepth - 1;
       if (vlBest == -MATE_VALUE) {
         vl = -SearchFull(-MATE_VALUE, MATE_VALUE, nNewDepth, NO_NULL);
       } else {
@@ -415,18 +415,18 @@ static int SearchRoot(int nDepth) {
           vl = -SearchFull(-MATE_VALUE, -vlBest, nNewDepth, NO_NULL);
         }
       }
-      pos.UndoMakeMove();
+      XQWL_SEARCH_POS.UndoMakeMove();
       if (vl > vlBest) {
         vlBest = vl;
-        Search.mvResult = mv;
+        XQWL_SEARCH_TAB.mvResult = mv;
         if (vlBest > -WIN_VALUE && vlBest < WIN_VALUE) {
           vlBest += (std::rand() & RANDOM_MASK) - (std::rand() & RANDOM_MASK);
         }
       }
     }
   }
-  RecordHash(HASH_PV, vlBest, nDepth, Search.mvResult);
-  SetBestMove(Search.mvResult, nDepth);
+  RecordHash(HASH_PV, vlBest, nDepth, XQWL_SEARCH_TAB.mvResult);
+  SetBestMove(XQWL_SEARCH_TAB.mvResult, nDepth);
   return vlBest;
 }
 
@@ -436,30 +436,30 @@ static void SearchMain(void) {
   clock_t deadline =
       g_xqwl_sc->t_start + static_cast<clock_t>(g_xqwl_sc->time_limit_ms) * CLOCKS_PER_SEC / 1000;
 
-  std::memset(Search.nHistoryTable, 0, 65536 * sizeof(int));
-  std::memset(Search.mvKillers, 0, LIMIT_DEPTH * 2 * sizeof(int));
-  std::memset(Search.HashTable, 0, HASH_SIZE * sizeof(HashItem));
-  pos.nDistance = 0;
+  std::memset(XQWL_SEARCH_TAB.nHistoryTable, 0, 65536 * sizeof(int));
+  std::memset(XQWL_SEARCH_TAB.mvKillers, 0, LIMIT_DEPTH * 2 * sizeof(int));
+  std::memset(XQWL_SEARCH_TAB.HashTable, 0, HASH_SIZE * sizeof(HashItem));
+  XQWL_SEARCH_POS.nDistance = 0;
 
   if (g_xqwl_sc->use_book) {
-    Search.mvResult = SearchBook();
-    if (Search.mvResult != 0) {
-      if (pos.MakeMove(Search.mvResult)) {
-        if (pos.RepStatus(3) == 0) {
-          pos.UndoMakeMove();
+    XQWL_SEARCH_TAB.mvResult = SearchBook();
+    if (XQWL_SEARCH_TAB.mvResult != 0) {
+      if (XQWL_SEARCH_POS.MakeMove(XQWL_SEARCH_TAB.mvResult)) {
+        if (XQWL_SEARCH_POS.RepStatus(3) == 0) {
+          XQWL_SEARCH_POS.UndoMakeMove();
           return;
         }
-        pos.UndoMakeMove();
+        XQWL_SEARCH_POS.UndoMakeMove();
       }
     }
   }
 
   vl = 0;
-  nGenMoves = pos.GenerateMoves(mvs);
+  nGenMoves = XQWL_SEARCH_POS.GenerateMoves(mvs);
   for (i = 0; i < nGenMoves; i++) {
-    if (pos.MakeMove(mvs[i])) {
-      pos.UndoMakeMove();
-      Search.mvResult = mvs[i];
+    if (XQWL_SEARCH_POS.MakeMove(mvs[i])) {
+      XQWL_SEARCH_POS.UndoMakeMove();
+      XQWL_SEARCH_TAB.mvResult = mvs[i];
       vl++;
     }
   }

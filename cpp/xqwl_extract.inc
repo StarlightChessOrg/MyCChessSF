@@ -694,8 +694,7 @@ int PositionStruct::GenerateMoves(int *mvs, BOOL bCapture) const {
         }
         pcDst = ucpcSquares[sqDst];
         if (bCapture ? (pcDst & pcOppSide) != 0 : (pcDst & pcSelfSide) == 0) {
-          mvs[nGenMoves] = MOVE(sqSrc, sqDst);
-          nGenMoves ++;
+          push_mv(MOVE(sqSrc, sqDst));
         }
       }
       break;
@@ -707,8 +706,7 @@ int PositionStruct::GenerateMoves(int *mvs, BOOL bCapture) const {
         }
         pcDst = ucpcSquares[sqDst];
         if (bCapture ? (pcDst & pcOppSide) != 0 : (pcDst & pcSelfSide) == 0) {
-          mvs[nGenMoves] = MOVE(sqSrc, sqDst);
-          nGenMoves ++;
+          push_mv(MOVE(sqSrc, sqDst));
         }
       }
       break;
@@ -721,8 +719,7 @@ int PositionStruct::GenerateMoves(int *mvs, BOOL bCapture) const {
         sqDst += ccAdvisorDelta[i];
         pcDst = ucpcSquares[sqDst];
         if (bCapture ? (pcDst & pcOppSide) != 0 : (pcDst & pcSelfSide) == 0) {
-          mvs[nGenMoves] = MOVE(sqSrc, sqDst);
-          nGenMoves ++;
+          push_mv(MOVE(sqSrc, sqDst));
         }
       }
       break;
@@ -739,8 +736,7 @@ int PositionStruct::GenerateMoves(int *mvs, BOOL bCapture) const {
           }
           pcDst = ucpcSquares[sqDst];
           if (bCapture ? (pcDst & pcOppSide) != 0 : (pcDst & pcSelfSide) == 0) {
-            mvs[nGenMoves] = MOVE(sqSrc, sqDst);
-            nGenMoves ++;
+            push_mv(MOVE(sqSrc, sqDst));
           }
         }
       }
@@ -753,13 +749,11 @@ int PositionStruct::GenerateMoves(int *mvs, BOOL bCapture) const {
           pcDst = ucpcSquares[sqDst];
           if (pcDst == 0) {
             if (!bCapture) {
-              mvs[nGenMoves] = MOVE(sqSrc, sqDst);
-              nGenMoves ++;
+              push_mv(MOVE(sqSrc, sqDst));
             }
           } else {
             if ((pcDst & pcOppSide) != 0) {
-              mvs[nGenMoves] = MOVE(sqSrc, sqDst);
-              nGenMoves ++;
+              push_mv(MOVE(sqSrc, sqDst));
             }
             break;
           }
@@ -775,8 +769,7 @@ int PositionStruct::GenerateMoves(int *mvs, BOOL bCapture) const {
           pcDst = ucpcSquares[sqDst];
           if (pcDst == 0) {
             if (!bCapture) {
-              mvs[nGenMoves] = MOVE(sqSrc, sqDst);
-              nGenMoves ++;
+              push_mv(MOVE(sqSrc, sqDst));
             }
           } else {
             break;
@@ -788,8 +781,7 @@ int PositionStruct::GenerateMoves(int *mvs, BOOL bCapture) const {
           pcDst = ucpcSquares[sqDst];
           if (pcDst != 0) {
             if ((pcDst & pcOppSide) != 0) {
-              mvs[nGenMoves] = MOVE(sqSrc, sqDst);
-              nGenMoves ++;
+              push_mv(MOVE(sqSrc, sqDst));
             }
             break;
           }
@@ -802,8 +794,7 @@ int PositionStruct::GenerateMoves(int *mvs, BOOL bCapture) const {
       if (IN_BOARD(sqDst)) {
         pcDst = ucpcSquares[sqDst];
         if (bCapture ? (pcDst & pcOppSide) != 0 : (pcDst & pcSelfSide) == 0) {
-          mvs[nGenMoves] = MOVE(sqSrc, sqDst);
-          nGenMoves ++;
+          push_mv(MOVE(sqSrc, sqDst));
         }
       }
       if (AWAY_HALF(sqSrc, sdPlayer)) {
@@ -812,8 +803,7 @@ int PositionStruct::GenerateMoves(int *mvs, BOOL bCapture) const {
           if (IN_BOARD(sqDst)) {
             pcDst = ucpcSquares[sqDst];
             if (bCapture ? (pcDst & pcOppSide) != 0 : (pcDst & pcSelfSide) == 0) {
-              mvs[nGenMoves] = MOVE(sqSrc, sqDst);
-              nGenMoves ++;
+              push_mv(MOVE(sqSrc, sqDst));
             }
           }
         }
