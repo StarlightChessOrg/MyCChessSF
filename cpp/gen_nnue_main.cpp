@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <memory>
 #include <string>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -166,9 +167,14 @@ void worker_main(int worker_id, long long quota, const GenConfig &cfg) {
   }
   std::vector<char> io_buf(kIoBufferBytes);
   setvbuf(fp, io_buf.data(), _IOFBF, io_buf.size());
+  std::fprintf(stderr, "[worker %d] started -> %s (quota %lld)\n", worker_id, out_path.c_str(),
+               static_cast<long long>(quota));
+  std::fflush(stderr);
 
+  // Hash table is ~16 MiB; keep off the stack (default thread stack is often 8 MiB).
+  auto tab = std::make_unique<XqwlSearchTables>();
+  std::memset(tab.get(), 0, sizeof(XqwlSearchTables));
   PositionStruct pos;
-  XqwlSearchTables tab{};
   long long written = 0;
 
   while (written < quota) {
@@ -177,7 +183,7 @@ void worker_main(int worker_id, long long quota, const GenConfig &cfg) {
       const std::string fen = xqwl_position_to_fen(pos);
       PositionStruct search_pos = pos;
       const XqwlSearchOutcome search =
-          XqwlSearchBestMoveEx(search_pos, tab, cfg.think_ms, /*use_book=*/false);
+          XqwlSearchBestMoveEx(search_pos, *tab, cfg.think_ms, /*use_book=*/false);
 
       std::fprintf(fp, "%s\t%d\n", fen.c_str(), search.score);
       ++written;
@@ -246,15 +252,28 @@ int main(int argc, char **argv) {
   }
 
   int failed = 0;
-  for (pid_t pid : children) {
+  for (size_t i = 0; i < children.size(); ++i) {
     int status = 0;
+    const pid_t pid = children[i];
     if (::waitpid(pid, &status, 0) < 0) {
       std::perror("waitpid");
       failed = 1;
       continue;
     }
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+    if (WIFSIGNALED(status)) {
+      std::fprintf(stderr, "[xqwl_gen_nnue] worker %zu (pid %d) killed by signal %d\n", i, static_cast<int>(pid),
+                   WTERMSIG(status));
       failed = 1;
+    } else if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+      std::fprintf(stderr, "[xqwl_gen_nnue] worker %zu (pid %d) exited abnormally (status=0x%x)\n", i,
+                   static_cast<int>(pid), status);
+      failed = 1;
+    }
+  }
+  if (failed) {
+    std::fprintf(stderr, "[xqwl_gen_nnue] one or more workers failed\n");
+  } else {
+    std::fprintf(stderr, "[xqwl_gen_nnue] all workers finished\n");
   }
   return failed ? 1 : 0;
 }
