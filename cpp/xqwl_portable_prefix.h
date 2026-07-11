@@ -38,7 +38,8 @@ const int BAN_VALUE = MATE_VALUE - 100;
 const int WIN_VALUE = MATE_VALUE - 200;
 const int DRAW_VALUE = 20;
 const int ADVANCED_VALUE = 3;
-const int NULL_MARGIN = 400;
+const int NULL_OKAY_MARGIN = 200;
+const int NULL_SAFE_MARGIN = 400;
 
 // Search constants (XQWL 0.6)
 const int RANDOM_MASK = 7;

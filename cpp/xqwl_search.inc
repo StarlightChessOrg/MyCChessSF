@@ -269,6 +269,17 @@ static int CompareMvvLva(const void *lpmv1, const void *lpmv2) {
   return MvvLva(*static_cast<const int *>(lpmv2)) - MvvLva(*static_cast<const int *>(lpmv1));
 }
 
+/** Trim low-value captures in quiescence (matches xqwlight search.js). */
+static int TrimQuiescCaptureCount(int *mvs, int nGenMoves) {
+  for (int i = 0; i < nGenMoves; i++) {
+    const int vl = MvvLva(mvs[i]);
+    if (vl < 10 || (vl < 20 && HOME_HALF(DST(mvs[i]), XQWL_SEARCH_POS.sdPlayer))) {
+      return i;
+    }
+  }
+  return nGenMoves;
+}
+
 static int CompareHistory(const void *lpmv1, const void *lpmv2) {
   return XQWL_SEARCH_TAB.nHistoryTable[*static_cast<const int *>(lpmv2)] -
          XQWL_SEARCH_TAB.nHistoryTable[*static_cast<const int *>(lpmv1)];
@@ -284,12 +295,26 @@ struct SortStruct {
   int mvHash, mvKiller1, mvKiller2;
   int nPhase, nIndex, nGenMoves;
   int mvs[MAX_GEN_MOVES];
+  BOOL singleReply;
 
   void Init(int mvHash_) {
     mvHash = mvHash_;
     mvKiller1 = XQWL_SEARCH_TAB.mvKillers[XQWL_SEARCH_POS.nDistance][0];
     mvKiller2 = XQWL_SEARCH_TAB.mvKillers[XQWL_SEARCH_POS.nDistance][1];
     nPhase = PHASE_HASH;
+    singleReply = FALSE;
+    if (XQWL_SEARCH_POS.InCheck()) {
+      int tmp[MAX_GEN_MOVES];
+      const int n = XQWL_SEARCH_POS.GenerateMoves(tmp);
+      int cnt = 0;
+      for (int j = 0; j < n && cnt <= 1; j++) {
+        if (XqwlSearchMakeMove(tmp[j])) {
+          XqwlSearchUndoMakeMove();
+          cnt++;
+        }
+      }
+      singleReply = (cnt == 1);
+    }
   }
   int Next(void);
 };
@@ -375,6 +400,7 @@ static int SearchQuiesc(int vlAlpha, int vlBeta) {
     }
     nGenMoves = XQWL_SEARCH_POS.GenerateMoves(mvs, GEN_CAPTURE);
     qsort(mvs, static_cast<size_t>(nGenMoves), sizeof(int), CompareMvvLva);
+    nGenMoves = TrimQuiescCaptureCount(mvs, nGenMoves);
   }
 
   for (i = 0; i < nGenMoves; i++) {
@@ -420,7 +446,9 @@ static int SearchFull(int vlAlpha, int vlBeta, int nDepth, BOOL bNoNull = FALSE)
     XQWL_SEARCH_POS.NullMove();
     vl = -SearchFull(-vlBeta, 1 - vlBeta, nDepth - NULL_DEPTH - 1, NO_NULL);
     XQWL_SEARCH_POS.UndoNullMove();
-    if (vl >= vlBeta) {
+    if (vl >= vlBeta &&
+        (XQWL_SEARCH_POS.NullSafe() ||
+         -SearchFull(-vlBeta, 1 - vlBeta, nDepth - NULL_DEPTH, NO_NULL) >= vlBeta)) {
       return vl;
     }
   }
@@ -430,7 +458,7 @@ static int SearchFull(int vlAlpha, int vlBeta, int nDepth, BOOL bNoNull = FALSE)
   Sort.Init(mvHash);
   while ((mv = Sort.Next()) != 0) {
     if (XqwlSearchMakeMove(mv)) {
-      nNewDepth = XQWL_SEARCH_POS.InCheck() ? nDepth : nDepth - 1;
+      nNewDepth = (XQWL_SEARCH_POS.InCheck() || Sort.singleReply) ? nDepth : nDepth - 1;
       if (vlBest == -MATE_VALUE) {
         vl = -SearchFull(-vlBeta, -vlAlpha, nNewDepth);
       } else {
@@ -465,6 +493,25 @@ static int SearchFull(int vlAlpha, int vlBeta, int nDepth, BOOL bNoNull = FALSE)
   return vlBest;
 }
 
+static BOOL SearchUnique(int vlBeta, int nDepth) {
+  SortStruct Sort;
+  int mv;
+
+  Sort.Init(XQWL_SEARCH_TAB.mvResult);
+  Sort.Next();
+  while ((mv = Sort.Next()) != 0) {
+    if (XqwlSearchMakeMove(mv)) {
+      const int nNewDepth = (XQWL_SEARCH_POS.InCheck() || Sort.singleReply) ? nDepth : nDepth - 1;
+      const int vl = -SearchFull(-vlBeta, 1 - vlBeta, nNewDepth);
+      XqwlSearchUndoMakeMove();
+      if (vl >= vlBeta) {
+        return FALSE;
+      }
+    }
+  }
+  return TRUE;
+}
+
 static int SearchRoot(int nDepth) {
   int vl, vlBest, mv, nNewDepth;
   SortStruct Sort;
@@ -473,7 +520,7 @@ static int SearchRoot(int nDepth) {
   Sort.Init(XQWL_SEARCH_TAB.mvResult);
   while ((mv = Sort.Next()) != 0) {
     if (XqwlSearchMakeMove(mv)) {
-      nNewDepth = XQWL_SEARCH_POS.InCheck() ? nDepth : nDepth - 1;
+      nNewDepth = (XQWL_SEARCH_POS.InCheck() || Sort.singleReply) ? nDepth : nDepth - 1;
       if (vlBest == -MATE_VALUE) {
         vl = -SearchFull(-MATE_VALUE, MATE_VALUE, nNewDepth, NO_NULL);
       } else {
@@ -553,6 +600,9 @@ static void SearchMain(void) {
     g_xqwl_sc->nLastDepth = i;
     g_xqwl_sc->nLastScore = vl;
     if (vl > WIN_VALUE || vl < -WIN_VALUE) {
+      break;
+    }
+    if (SearchUnique(1 - WIN_VALUE, i)) {
       break;
     }
     if (std::clock() >= deadline) {
