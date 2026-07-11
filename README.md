@@ -31,6 +31,7 @@ bash scripts/build_linux.sh
 或手动：
 
 ```bash
+python3 -m pip install pybind11
 cd cpp/build
 cmake .. -DPython_EXECUTABLE="$(which python3)"
 cmake --build . -j"$(nproc)"
