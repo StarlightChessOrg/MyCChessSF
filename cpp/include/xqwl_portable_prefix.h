@@ -61,7 +61,11 @@ const int SINGULAR_MIN_DEPTH = 6;
 const int SINGULAR_MARGIN = 12;
 const int BOOK_MAX_ENTRIES = 5000000; // max opening-book lines loaded into RAM
 
-// Dynamic PST pawn tuning (standalone PST without ElephantEye lazy eval)
-const int PAWN_ATTACK_BLEND_CAP = 4; // max attacking blend weight (of 8) for pawns
-const int PAWN_ATTACK_GAIN_NUM = 13;  // apply this fraction of the att-less delta
-const int PAWN_ATTACK_GAIN_DEN = 20;
+// Dynamic PST blend (XQWL cucvlPiecePos only; see xqwl_preeval.inc)
+const int PST_MIDGAME_TOTAL = 66;
+const int PST_ATTACK_CAP = 8;
+const int PST_KNIGHT_END_PCT = 98; // endgame PST as % of XQWL mid table (same shape)
+const int PST_ROOK_END_PCT = 90;
+const int PST_CANNON_END_PCT = 95;
+const int PST_ADV_BISH_PENALTY = 2;  // subtract per opponent major-attack point
+const int PST_ADV_LEAK_BONUS = 60;   // bonus when opponent major attack is low

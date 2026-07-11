@@ -146,7 +146,7 @@ static const BYTE cucpcStartup[256] = {
   0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
 };
 
-// Static midgame PST baseline (attackless); dynamic blend in xqwl_preeval.inc
+// Static midgame PST baseline; dynamic blend derives endgame scales in xqwl_preeval.inc
 static const BYTE cucvlPiecePos[7][256] = {
   { // King
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,

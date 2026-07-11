@@ -1,10 +1,9 @@
 #ifndef XQWL_PREEVAL_INC
 #define XQWL_PREEVAL_INC
 
-#include "xqwl_preeval_tables.inc"
-
-// Dynamic PST refresh: opening/middle/endgame material mix + attack posture blend.
-// Inspired by ElephantEye PreEvaluate, adapted to our mailbox board and score layout.
+// Dynamic PST: XQWL cucvlPiecePos is the sole matrix source.
+// Endgame shape = uniform per-piece scale of the same table (no ElephantEye imports).
+// King/pawn stay static; advisor/bishop get a small major-attack penalty only.
 
 namespace xqwl_pst {
 
@@ -23,7 +22,6 @@ inline int clampInt(int v, int lo, int hi) {
 }
 
 static int midgameWeight(const PositionStruct &pos) {
-  constexpr int kTotal = 66; // 4 rooks*6 + 8 knights/cannons*3 + 18 others*1
   int raw = 0;
   for (int sq = 0; sq < 256; ++sq) {
     if (!IN_BOARD(sq)) {
@@ -47,8 +45,8 @@ static int midgameWeight(const PositionStruct &pos) {
         break;
     }
   }
-  raw = (2 * kTotal - raw) * raw / kTotal;
-  return clampInt(raw, 0, kTotal);
+  raw = (2 * PST_MIDGAME_TOTAL - raw) * raw / PST_MIDGAME_TOTAL;
+  return clampInt(raw, 0, PST_MIDGAME_TOTAL);
 }
 
 static int majorValue(const PositionStruct &pos, int sd) {
@@ -75,39 +73,8 @@ static int majorValue(const PositionStruct &pos, int sd) {
   return v;
 }
 
-static int attackWeight(const PositionStruct &pos, int sd) {
-  constexpr int kCap = 8;
-  int n = 0;
-  for (int sq = 0; sq < 256; ++sq) {
-    if (!IN_BOARD(sq)) {
-      continue;
-    }
-    const BYTE pc = pos.ucpcSquares[sq];
-    if (pc == 0) {
-      continue;
-    }
-    const BOOL ours = (pc < 16) ? (sd == 0) : (sd == 1);
-    if (!ours || !AWAY_HALF(sq, sd)) {
-      continue;
-    }
-    const int kind = (pc < 16) ? pc - 8 : pc - 16;
-    if (kind == PIECE_KNIGHT || kind == PIECE_ROOK) {
-      n += 2;
-    } else if (kind == PIECE_CANNON || kind == PIECE_PAWN) {
-      n += 1;
-    }
-  }
-  const int selfMajor = majorValue(pos, sd);
-  const int oppMajor = majorValue(pos, 1 - sd);
-  if (selfMajor > oppMajor) {
-    n += (selfMajor - oppMajor) * 2;
-  }
-  return clampInt(n, 0, kCap);
-}
-
-/** Attack index for pawn PST: major pieces only, capped and damped (no pawn feedback loop). */
-static int pawnAttackWeight(const PositionStruct &pos, int sd) {
-  constexpr int kCap = PAWN_ATTACK_BLEND_CAP;
+/** Crossed-river major attack index (no pawns; avoids pawn-rush feedback). */
+static int majorAttackWeight(const PositionStruct &pos, int sd) {
   int n = 0;
   for (int sq = 0; sq < 256; ++sq) {
     if (!IN_BOARD(sq)) {
@@ -133,14 +100,11 @@ static int pawnAttackWeight(const PositionStruct &pos, int sd) {
   if (selfMajor > oppMajor) {
     n += (selfMajor - oppMajor);
   }
-  return clampInt(n, 0, kCap);
+  return clampInt(n, 0, PST_ATTACK_CAP);
 }
 
-inline int pawnSquareValue(const Context &ctx, int pc, int sqBase) {
-  const int ownAtk = (pc < 16) ? ctx.whitePawnAttack : ctx.blackPawnAttack;
-  const int less = ctx.pawnLess[sqBase];
-  const int blended = lerp(ctx.pawnAtt[sqBase], less, ownAtk, PAWN_ATTACK_BLEND_CAP);
-  return less + (blended - less) * PAWN_ATTACK_GAIN_NUM / PAWN_ATTACK_GAIN_DEN;
+static BYTE scaledEndgame(int midVal, int endPct) {
+  return static_cast<BYTE>((midVal * endPct) / 100);
 }
 
 inline int pieceSquareValue(const Context &ctx, int pc, int sq) {
@@ -148,11 +112,14 @@ inline int pieceSquareValue(const Context &ctx, int pc, int sq) {
   const int sqBase = (pc < 16) ? sq : SQUARE_FLIP(sq);
   switch (pt) {
     case PIECE_KING:
-      return ctx.king[sqBase];
+    case PIECE_PAWN:
+      return cucvlPiecePos[pt][sqBase];
     case PIECE_ADVISOR:
     case PIECE_BISHOP: {
-      const int oppAtk = (pc < 16) ? ctx.blackAttack : ctx.whiteAttack;
-      return lerp(kAdvBishThreat[sqBase], cucvlPiecePos[pt][sqBase], oppAtk, 8);
+      const int base = cucvlPiecePos[pt][sqBase];
+      const int oppAtk = (pc < 16) ? ctx.blackMajorAttack : ctx.whiteMajorAttack;
+      const int penalty = oppAtk * PST_ADV_BISH_PENALTY;
+      return base > penalty ? base - penalty : 0;
     }
     case PIECE_KNIGHT:
       return ctx.knight[sqBase];
@@ -160,40 +127,32 @@ inline int pieceSquareValue(const Context &ctx, int pc, int sq) {
       return ctx.rook[sqBase];
     case PIECE_CANNON:
       return ctx.cannon[sqBase];
-    case PIECE_PAWN:
-      return pawnSquareValue(ctx, pc, sqBase);
     default:
       return 0;
   }
 }
 
 inline void refresh(PositionStruct &pos) {
-  constexpr int kMidTotal = 66;
-  constexpr int kAtkTotal = 8;
-  constexpr int kAdvLeak = 80;
-
   Context &ctx = pos.pst;
   ctx.midgame = midgameWeight(pos);
-  ctx.whiteAttack = attackWeight(pos, 0);
-  ctx.blackAttack = attackWeight(pos, 1);
-  ctx.whitePawnAttack = pawnAttackWeight(pos, 0);
-  ctx.blackPawnAttack = pawnAttackWeight(pos, 1);
-  ctx.vlAdvanced = (ADVANCED_VALUE * ctx.midgame + kMidTotal / 2) / kMidTotal;
+  ctx.whiteMajorAttack = majorAttackWeight(pos, 0);
+  ctx.blackMajorAttack = majorAttackWeight(pos, 1);
+  ctx.vlAdvanced = (ADVANCED_VALUE * ctx.midgame + PST_MIDGAME_TOTAL / 2) / PST_MIDGAME_TOTAL;
 
   for (int sq = 0; sq < 256; ++sq) {
     if (!IN_BOARD(sq)) {
       continue;
     }
-    ctx.king[sq] = lerp(kKingPawnMidAtt[sq], kKingPawnEndAtt[sq], ctx.midgame, kMidTotal);
-    ctx.knight[sq] = lerp(cucvlPiecePos[PIECE_KNIGHT][sq], kKnightEnd[sq], ctx.midgame, kMidTotal);
-    ctx.rook[sq] = lerp(cucvlPiecePos[PIECE_ROOK][sq], kRookEnd[sq], ctx.midgame, kMidTotal);
-    ctx.cannon[sq] = lerp(cucvlPiecePos[PIECE_CANNON][sq], kCannonEnd[sq], ctx.midgame, kMidTotal);
-    ctx.pawnAtt[sq] = ctx.king[sq];
-    ctx.pawnLess[sq] = lerp(kKingPawnMidLess[sq], kKingPawnEndLess[sq], ctx.midgame, kMidTotal);
+    const int knMid = cucvlPiecePos[PIECE_KNIGHT][sq];
+    const int rkMid = cucvlPiecePos[PIECE_ROOK][sq];
+    const int cnMid = cucvlPiecePos[PIECE_CANNON][sq];
+    ctx.knight[sq] = lerp(scaledEndgame(knMid, PST_KNIGHT_END_PCT), knMid, ctx.midgame, PST_MIDGAME_TOTAL);
+    ctx.rook[sq] = lerp(scaledEndgame(rkMid, PST_ROOK_END_PCT), rkMid, ctx.midgame, PST_MIDGAME_TOTAL);
+    ctx.cannon[sq] = lerp(scaledEndgame(cnMid, PST_CANNON_END_PCT), cnMid, ctx.midgame, PST_MIDGAME_TOTAL);
   }
 
-  pos.vlWhite = kAdvLeak * (kAtkTotal - ctx.blackAttack) / kAtkTotal;
-  pos.vlBlack = kAdvLeak * (kAtkTotal - ctx.whiteAttack) / kAtkTotal;
+  pos.vlWhite = PST_ADV_LEAK_BONUS * (PST_ATTACK_CAP - ctx.blackMajorAttack) / PST_ATTACK_CAP;
+  pos.vlBlack = PST_ADV_LEAK_BONUS * (PST_ATTACK_CAP - ctx.whiteMajorAttack) / PST_ATTACK_CAP;
   for (int sq = 0; sq < 256; ++sq) {
     if (!IN_BOARD(sq)) {
       continue;
