@@ -60,8 +60,8 @@ class XqwlGameState:
 
     def board_view(self) -> np.ndarray:
         board, _ = parse_fen_board(self.pos.fen())
-        flipped = np.flip(np.asarray(board), axis=0)
-        return np.array(flipped, dtype="<U1", copy=True)
+        # FEN row 0 = black (top), row 9 = red (bottom); no extra flip.
+        return np.array(board, dtype="<U1", copy=True)
 
     def terminal(self) -> tuple[bool, str]:
         k = int(self.pos.terminal_kind())

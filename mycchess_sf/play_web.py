@@ -142,6 +142,14 @@ class XqwlWebSession:
         else:
             self._toasts.append({"kind": "info", "title": "终局", "body": r})
 
+    def _view_flip_y(self) -> bool:
+        """Flip board so the human-controlled side sits at the bottom (like XQWL bFlipped)."""
+        human_red = self.strategy_red == STRATEGY_HUMAN
+        human_black = self.strategy_black == STRATEGY_HUMAN
+        if human_black and not human_red:
+            return True
+        return False
+
     def snapshot(self) -> dict:
         with self._lock:
             arr = self._raw_board()
@@ -188,6 +196,7 @@ class XqwlWebSession:
                 "board_h": BOARD_HEIGHT,
                 "square": SQUARE_SIZE,
                 "edge": BOARD_EDGE,
+                "view_flip_y": self._view_flip_y(),
             }
 
     def pop_client_messages(self) -> dict:
@@ -408,7 +417,7 @@ def _html_page() -> str:
   const chkBook=document.getElementById("chk-book"), bookRow=document.getElementById("book-row");
   const chkSound=document.getElementById("chk-sound");
   const aiThinkingEl=document.getElementById("ai-thinking"), aiLogBody=document.getElementById("ai-log-body");
-  let viewFlipY=false, pollTimer=null, lastSnap=null;
+  let viewFlipY=false, userFlipped=false, pollTimer=null, lastSnap=null;
   const sounds={{}};
   ["click","illegal","move","move2","capture","capture2","check","check2","win","draw","loss"].forEach(function(n){{
     sounds[n]=new Audio("/static/xqwl/"+n+".wav");
@@ -453,6 +462,8 @@ def _html_page() -> str:
   function applySnap(snap){{
     fillStrategiesOnce(snap.strategies||[]);
     selRed.value=snap.strategy_red; selBlack.value=snap.strategy_black;
+    if(!userFlipped) viewFlipY=!!snap.view_flip_y;
+    updateFlipButton();
     if(chkBook&&bookRow){{
       var avail=!!snap.book_available;
       chkBook.disabled=!avail;
@@ -506,21 +517,28 @@ def _html_page() -> str:
       .then(function(j){{if(j.error)showAlert("走子",j.error);else armPoll(20);}});
   }},{{passive:false}});
   selRed.addEventListener("change",function(){{
+    userFlipped=false;
     fetch("/api/strategies",{{method:"POST",headers:{{"Content-Type":"application/json"}},
       body:JSON.stringify({{red:selRed.value,black:selBlack.value}})}}).then(function(r){{return r.json();}})
       .then(function(j){{if(j.error)showAlert("策略",j.error);else armPoll(20);}});
   }});
   selBlack.addEventListener("change",function(){{
+    userFlipped=false;
     fetch("/api/strategies",{{method:"POST",headers:{{"Content-Type":"application/json"}},
       body:JSON.stringify({{red:selRed.value,black:selBlack.value}})}}).then(function(r){{return r.json();}})
       .then(function(j){{if(j.error)showAlert("策略",j.error);else armPoll(20);}});
   }});
   btnNew.addEventListener("click",function(){{
+    userFlipped=false;
     fetch("/api/new_game",{{method:"POST"}}).then(function(r){{return r.json();}}).then(function(){{armPoll(20);}});
   }});
+  function updateFlipButton(){{
+    btnFlip.textContent=viewFlipY?"翻转棋盘（还原红下）":"翻转棋盘（己方在下）";
+  }}
   btnFlip.addEventListener("click",function(){{
+    userFlipped=true;
     viewFlipY=!viewFlipY;
-    btnFlip.textContent=viewFlipY?"翻转棋盘（还原红下）":"翻转棋盘（黑方视角）";
+    updateFlipButton();
     if(lastSnap)renderBoard(lastSnap);
   }});
   if(chkBook){{
