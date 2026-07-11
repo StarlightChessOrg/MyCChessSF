@@ -1,0 +1,303 @@
+"""Train MyCChessSF NNUE on nnue_data (XQWL-PSQ, z-score labels)."""
+from __future__ import annotations
+
+import argparse
+import math
+import sys
+import time
+from pathlib import Path
+
+import torch
+import torch.nn as nn
+import yaml
+
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from data.dataset import (
+    NnueDataset,
+    compute_zscore_stats,
+    make_dataloader,
+    split_samples,
+)
+from features.xqwl_psq import N_FEATURES
+from model.nnue import NNUE
+
+
+def load_config(path: Path) -> dict:
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def resolve_path(base: Path, maybe_rel: str) -> Path:
+    p = Path(maybe_rel)
+    return p if p.is_absolute() else (base / p).resolve()
+
+
+@torch.no_grad()
+def evaluate(
+    model: nn.Module,
+    loader,
+    device: torch.device,
+    criterion,
+    *,
+    label_mean: float,
+    label_std: float,
+) -> dict[str, float]:
+    model.eval()
+    total_loss = 0.0
+    total_abs_norm = 0.0
+    total_sq_norm = 0.0
+    total_abs_vl = 0.0
+    n = 0
+
+    sum_pred = 0.0
+    sum_true = 0.0
+    sum_pred_sq = 0.0
+    sum_true_sq = 0.0
+    sum_cross = 0.0
+
+    for indices, offsets, targets_norm, targets_raw in loader:
+        indices = indices.to(device)
+        offsets = offsets.to(device)
+        targets_norm = targets_norm.to(device)
+        targets_raw = targets_raw.to(device)
+
+        preds_norm = model(indices, offsets)
+        loss = criterion(preds_norm, targets_norm)
+        preds_vl = preds_norm * label_std + label_mean
+
+        bs = targets_norm.size(0)
+        total_loss += loss.item() * bs
+        total_abs_norm += (preds_norm - targets_norm).abs().sum().item()
+        total_sq_norm += ((preds_norm - targets_norm) ** 2).sum().item()
+        total_abs_vl += (preds_vl - targets_raw).abs().sum().item()
+
+        sum_pred += preds_vl.sum().item()
+        sum_true += targets_raw.sum().item()
+        sum_pred_sq += (preds_vl * preds_vl).sum().item()
+        sum_true_sq += (targets_raw * targets_raw).sum().item()
+        sum_cross += (preds_vl * targets_raw).sum().item()
+        n += bs
+
+    if n == 0:
+        return {
+            "loss": math.inf,
+            "mae_norm": math.inf,
+            "rmse_norm": math.inf,
+            "mae_vl": math.inf,
+            "corr_vl": math.nan,
+        }
+
+    mean_pred = sum_pred / n
+    mean_true = sum_true / n
+    var_pred = max(sum_pred_sq / n - mean_pred * mean_pred, 0.0)
+    var_true = max(sum_true_sq / n - mean_true * mean_true, 0.0)
+    cov = sum_cross / n - mean_pred * mean_true
+    denom = math.sqrt(var_pred * var_true)
+    corr_vl = cov / denom if denom > 1e-12 else 0.0
+
+    return {
+        "loss": total_loss / n,
+        "mae_norm": total_abs_norm / n,
+        "rmse_norm": math.sqrt(total_sq_norm / n),
+        "mae_vl": total_abs_vl / n,
+        "corr_vl": corr_vl,
+    }
+
+
+def save_checkpoint(
+    path: Path,
+    *,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    epoch: int,
+    val_loss: float,
+    label_mean: float,
+    label_std: float,
+    config: dict,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "val_loss": val_loss,
+            "label_mean": label_mean,
+            "label_std": label_std,
+            "config": config,
+            "n_features": N_FEATURES,
+        },
+        path,
+    )
+
+
+def train_epoch(
+    model: nn.Module,
+    loader,
+    device: torch.device,
+    optimizer,
+    criterion,
+    *,
+    log_every: int,
+    epoch: int,
+) -> float:
+    model.train()
+    total_loss = 0.0
+    n = 0
+    t0 = time.time()
+
+    for step, (indices, offsets, targets_norm, _targets_raw) in enumerate(loader, start=1):
+        indices = indices.to(device)
+        offsets = offsets.to(device)
+        targets_norm = targets_norm.to(device)
+
+        optimizer.zero_grad(set_to_none=True)
+        preds = model(indices, offsets)
+        loss = criterion(preds, targets_norm)
+        loss.backward()
+        optimizer.step()
+
+        bs = targets_norm.size(0)
+        total_loss += loss.item() * bs
+        n += bs
+
+        if log_every > 0 and step % log_every == 0:
+            avg = total_loss / n
+            elapsed = time.time() - t0
+            print(f"  epoch {epoch} step {step}  train_loss={avg:.6f}  ({elapsed:.1f}s)")
+
+    return total_loss / max(n, 1)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Train MyCChessSF NNUE")
+    parser.add_argument("--config", type=Path, default=ROOT / "configs" / "smoke.yaml")
+    args = parser.parse_args()
+
+    cfg = load_config(args.config)
+    data_cfg = cfg["data"]
+    model_cfg = cfg["model"]
+    train_cfg = cfg["train"]
+
+    data_source = resolve_path(ROOT, data_cfg["source"])
+    ckpt_dir = resolve_path(ROOT, train_cfg.get("checkpoint_dir", "checkpoints"))
+    device = torch.device(train_cfg.get("device", "cpu"))
+
+    print(f"[data] source={data_source}")
+    train_samples, val_samples, skipped = split_samples(
+        data_source,
+        data_cfg.get("pattern", "worker_*.txt"),
+        data_cfg.get("val_workers", [30, 31]),
+    )
+    print(f"[data] train={len(train_samples)}  val={len(val_samples)}  skipped={skipped}")
+
+    label_mean, label_std = compute_zscore_stats(train_samples)
+    print(f"[label] z-score mean={label_mean:.4f}  std={label_std:.4f}")
+
+    train_ds = NnueDataset(train_samples, label_mean=label_mean, label_std=label_std)
+    val_ds = NnueDataset(val_samples, label_mean=label_mean, label_std=label_std)
+
+    num_workers = train_cfg.get("num_workers", 0)
+    print(f"[loader] num_workers={num_workers}  batch_size={train_cfg['batch_size']}")
+
+    use_pin = device.type == "cuda"
+    train_loader = make_dataloader(
+        train_ds,
+        batch_size=train_cfg["batch_size"],
+        shuffle=True,
+        num_workers=num_workers,
+        prefetch_factor=train_cfg.get("prefetch_factor", 2),
+        pin_memory=use_pin,
+    )
+    val_loader = make_dataloader(
+        val_ds,
+        batch_size=train_cfg["batch_size"],
+        shuffle=False,
+        num_workers=num_workers,
+        prefetch_factor=train_cfg.get("prefetch_factor", 2),
+        pin_memory=use_pin,
+    )
+
+    model = NNUE(
+        n_features=model_cfg.get("n_features", N_FEATURES),
+        l1=model_cfg["l1"],
+        l2=model_cfg["l2"],
+        l3=model_cfg["l3"],
+    ).to(device)
+
+    param_count = sum(p.numel() for p in model.parameters())
+    print(f"[model] params={param_count:,}")
+
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=train_cfg["lr"],
+        weight_decay=train_cfg.get("weight_decay", 0.0),
+    )
+    criterion = nn.MSELoss()
+
+    best_val = math.inf
+    epochs = train_cfg["epochs"]
+    log_every = train_cfg.get("log_every", 50)
+
+    for epoch in range(1, epochs + 1):
+        print(f"\n=== epoch {epoch}/{epochs} ===")
+        train_loss = train_epoch(
+            model,
+            train_loader,
+            device,
+            optimizer,
+            criterion,
+            log_every=log_every,
+            epoch=epoch,
+        )
+        val_metrics = evaluate(
+            model,
+            val_loader,
+            device,
+            criterion,
+            label_mean=label_mean,
+            label_std=label_std,
+        )
+        val_loss = val_metrics["loss"]
+
+        print(
+            f"epoch {epoch} done  train_loss={train_loss:.6f}  "
+            f"val_loss={val_loss:.6f}  val_mae_norm={val_metrics['mae_norm']:.6f}  "
+            f"val_rmse_norm={val_metrics['rmse_norm']:.6f}  "
+            f"val_mae_vl={val_metrics['mae_vl']:.2f}  val_corr_vl={val_metrics['corr_vl']:.4f}"
+        )
+
+        save_checkpoint(
+            ckpt_dir / "last.pt",
+            model=model,
+            optimizer=optimizer,
+            epoch=epoch,
+            val_loss=val_loss,
+            label_mean=label_mean,
+            label_std=label_std,
+            config=cfg,
+        )
+
+        if val_loss < best_val:
+            best_val = val_loss
+            save_checkpoint(
+                ckpt_dir / "best.pt",
+                model=model,
+                optimizer=optimizer,
+                epoch=epoch,
+                val_loss=val_loss,
+                label_mean=label_mean,
+                label_std=label_std,
+                config=cfg,
+            )
+            print(f"  saved best.pt  val_loss={val_loss:.6f}")
+
+    print(f"\n[done] best val_loss={best_val:.6f}")
+    print(f"checkpoints: {ckpt_dir / 'best.pt'} , {ckpt_dir / 'last.pt'}")
+
+
+if __name__ == "__main__":
+    main()

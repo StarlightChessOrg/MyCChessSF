@@ -1,0 +1,21 @@
+data:
+  source: ../nnue_data
+  pattern: "worker_*.txt"
+  val_workers: [30, 31]
+
+model:
+  n_features: 1260
+  l1: 512
+  l2: 32
+  l3: 32
+
+train:
+  batch_size: 2048
+  epochs: 5
+  lr: 0.001
+  weight_decay: 0.0
+  num_workers: 4
+  prefetch_factor: 2
+  device: cpu
+  checkpoint_dir: checkpoints
+  log_every: 50
