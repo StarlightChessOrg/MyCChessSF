@@ -589,7 +589,7 @@ struct PositionStruct {
         ((nRepStatus & 4) == 0 ? 0 : BAN_VALUE - nDistance);
     return vlReturn == 0 ? DrawValue() : vlReturn;
   }
-  BOOL NullOkay(void) const {                 // Null-move pruning material threshold
+  BOOL NullOkay(void) const {                 // Null-move pruning: PST material only (not NNUE)
     return (sdPlayer == 0 ? vlWhite : vlBlack) > NULL_MARGIN;
   }
   void Mirror(PositionStruct &posMirror) const; // Build horizontally mirrored copy

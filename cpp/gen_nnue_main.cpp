@@ -175,7 +175,7 @@ void worker_main(int worker_id, long long quota, const GenConfig &cfg) {
 
   // Hash table is ~16 MiB; keep off the stack (default thread stack is often 8 MiB).
   auto tab = std::make_unique<XqwlSearchTables>();
-  std::memset(tab.get(), 0, sizeof(XqwlSearchTables));
+  *tab = XqwlSearchTables{};
   PositionStruct pos;
   long long written = 0;
 

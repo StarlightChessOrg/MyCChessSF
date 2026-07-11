@@ -45,6 +45,60 @@ std::optional<int> iccs_to_move(const std::string &s) {
   return MOVE(COORD_XY_ICCS(x1, y1), COORD_XY_ICCS(x2, y2));
 }
 
+bool fen_char_to_pc(char ch, BYTE &pc) {
+  static const char *RED = "KABNRCP";
+  static const char *BLK = "kabnrcp";
+  for (int i = 0; i < 7; ++i) {
+    if (RED[i] == ch) {
+      pc = static_cast<BYTE>(8 + i);
+      return true;
+    }
+    if (BLK[i] == ch) {
+      pc = static_cast<BYTE>(16 + i);
+      return true;
+    }
+  }
+  return false;
+}
+
+bool set_board_from_fen(PositionStruct &board, const std::string &fen) {
+  const auto sp = fen.find(' ');
+  const std::string ranks = sp == std::string::npos ? fen : fen.substr(0, sp);
+  const std::string rest = sp == std::string::npos ? " w" : fen.substr(sp + 1);
+  const bool red_to_move = rest.empty() || rest[0] != 'b';
+
+  board.ClearBoard();
+  int y = 0;
+  int x = 0;
+  for (char ch : ranks) {
+    if (ch == '/') {
+      ++y;
+      x = 0;
+      continue;
+    }
+    if (ch >= '1' && ch <= '9') {
+      x += ch - '0';
+      continue;
+    }
+    if (x >= 9 || y >= 10) {
+      return false;
+    }
+    BYTE pc = 0;
+    if (!fen_char_to_pc(ch, pc)) {
+      return false;
+    }
+    board.AddPiece(COORD_XY_ICCS(x, y), pc);
+    ++x;
+  }
+  if (y != 9 || x != 9) {
+    return false;
+  }
+  board.sdPlayer = red_to_move ? 0 : 1;
+  board.nDistance = 0;
+  board.SetIrrev();
+  return true;
+}
+
 } // namespace
 
 namespace py = pybind11;
@@ -55,6 +109,8 @@ struct XQWLPosition {
   XQWLPosition() { reset(); }
 
   void reset() { board.Startup(); }
+
+  bool set_fen(const std::string &fen) { return set_board_from_fen(board, fen); }
 
   std::vector<int> legal_moves_mv() const {
     int mvs[MAX_GEN_MOVES];
@@ -142,6 +198,8 @@ struct XQWLPosition {
 
   std::string fen() const { return xqwl_position_to_fen(board); }
 
+  int evaluate() const { return board.Evaluate(); }
+
   int side_to_move() const { return board.sdPlayer; }
 
   XQWLPosition copy() const {
@@ -153,10 +211,35 @@ struct XQWLPosition {
 
 struct XQWLEngine {
   XqwlSearchTables tab{};
+  xqwl_nnue::Runtime nnue{};
+
+  XQWLEngine() { tab.nnue = &nnue; }
 
   void load_book(const std::string &path) { XqwlLoadBookFromFile(path.c_str(), tab); }
 
   int book_size() const { return tab.nBookSize; }
+
+  bool load_nnue(const std::string &path) {
+    const bool ok = nnue.load(path.c_str());
+    tab.nnue = ok ? &nnue : nullptr;
+    return ok;
+  }
+
+  void clear_nnue() {
+    nnue.loaded = false;
+    tab.nnue = nullptr;
+  }
+
+  bool nnue_loaded() const { return nnue.loaded; }
+
+  int evaluate_nnue(const XQWLPosition &position) const {
+    if (!nnue.loaded) {
+      return 0;
+    }
+    return nnue.evaluate_vl(position.board);
+  }
+
+  int evaluate_static(const XQWLPosition &position) const { return position.board.Evaluate(); }
 
   std::string search_best_iccs(const XQWLPosition &position, int time_ms = 1000, bool use_book = true) {
     PositionStruct work = position.board;
@@ -189,6 +272,7 @@ PYBIND11_MODULE(xqwlight_core, m) {
   py::class_<XQWLPosition>(m, "Position")
       .def(py::init<>())
       .def("reset", &XQWLPosition::reset)
+      .def("set_fen", &XQWLPosition::set_fen, py::arg("fen"))
       .def("legal_moves_mv", &XQWLPosition::legal_moves_mv)
       .def("legal_moves_iccs", &XQWLPosition::legal_moves_iccs)
       .def("make_move_mv", &XQWLPosition::make_move_mv)
@@ -205,6 +289,7 @@ PYBIND11_MODULE(xqwlight_core, m) {
       .def("is_mate", &XQWLPosition::is_mate)
       .def("terminal_kind", &XQWLPosition::terminal_kind)
       .def("fen", &XQWLPosition::fen)
+      .def("evaluate", &XQWLPosition::evaluate)
       .def("side_to_move", &XQWLPosition::side_to_move)
       .def("copy", &XQWLPosition::copy);
 
@@ -212,6 +297,11 @@ PYBIND11_MODULE(xqwlight_core, m) {
       .def(py::init<>())
       .def("load_book", &XQWLEngine::load_book, py::arg("path"))
       .def("book_size", &XQWLEngine::book_size)
+      .def("load_nnue", &XQWLEngine::load_nnue, py::arg("path"))
+      .def("clear_nnue", &XQWLEngine::clear_nnue)
+      .def("nnue_loaded", &XQWLEngine::nnue_loaded)
+      .def("evaluate_static", &XQWLEngine::evaluate_static, py::arg("position"))
+      .def("evaluate_nnue", &XQWLEngine::evaluate_nnue, py::arg("position"))
       .def("search_best_iccs", &XQWLEngine::search_best_iccs, py::arg("position"), py::arg("time_ms") = 1000,
            py::arg("use_book") = true)
       .def("search_best_mv", &XQWLEngine::search_best_mv, py::arg("position"), py::arg("time_ms") = 1000,

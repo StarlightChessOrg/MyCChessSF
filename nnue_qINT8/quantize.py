@@ -203,6 +203,12 @@ def main() -> None:
     quant_model.save(str(output_path))
     print(f"[saved] {output_path}")
 
+    bin_path = output_path.parent / f"{output_path.stem}.xqnnue.bin"
+    from export_bin import export_bin
+
+    export_bin(quant_model, bin_path)
+    print(f"[saved] {bin_path}")
+
 
 if __name__ == "__main__":
     main()
