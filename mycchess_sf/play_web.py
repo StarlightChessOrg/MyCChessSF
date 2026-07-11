@@ -30,6 +30,7 @@ from mycchess_sf.xqwl_state import REP_RULE_VALUE_DRAWISH_ABS
 STRATEGY_HUMAN = "人类"
 STRATEGY_XQWL = "象棋小巫师"
 STRATEGIES = (STRATEGY_HUMAN, STRATEGY_XQWL)
+AI_THINK_DELAY_SEC = 0.45
 
 
 def _piece_side(ch: str | None) -> str | None:
@@ -63,6 +64,23 @@ class XqwlWebSession:
         self._ai_busy = False
         self._ai_log: list[str] = []
         self._ai_thinking: str = ""
+        self._ai_timer: threading.Timer | None = None
+
+    def _cancel_ai_timer(self) -> None:
+        if self._ai_timer is not None:
+            self._ai_timer.cancel()
+            self._ai_timer = None
+
+    def _schedule_ai_after_human_move(self) -> None:
+        self._cancel_ai_timer()
+        self._ai_timer = threading.Timer(AI_THINK_DELAY_SEC, self._ai_timer_fire)
+        self._ai_timer.daemon = True
+        self._ai_timer.start()
+
+    def _ai_timer_fire(self) -> None:
+        with self._lock:
+            self._ai_timer = None
+        self.maybe_ai()
 
     def _raw_board(self):
         return self.game.board_view()
@@ -227,6 +245,7 @@ class XqwlWebSession:
 
     def new_game(self) -> dict | None:
         with self._lock:
+            self._cancel_ai_timer()
             self.game.reset()
             self.sel_from = None
             self.last_move = None
@@ -284,8 +303,8 @@ class XqwlWebSession:
                 return None
 
         if not game_over:
-            self.maybe_ai()
-        return None
+            self._schedule_ai_after_human_move()
+        return {}
 
     def maybe_ai(self) -> None:
         with self._lock:
@@ -499,13 +518,18 @@ def _html_page() -> str:
     if(ix<0||ix>8||iyVis<0||iyVis>9)return null;
     return {{ix:ix, iy:srvY(iyVis)}};  // board_view row for server
   }}
+  function applyClickResponse(j){{
+    if(j.error){{showAlert("走子",j.error);return;}}
+    if(j.state){{applySnap(j.state);handleMessages(j.messages||{{}});}}
+    armPoll(j.state&&j.state.ai_busy?120:280);
+  }}
   boardEl.addEventListener("click",function(ev){{
     if(shell.classList.contains("ai-busy"))return;
     var c=clickFromEvent(ev);
     if(!c)return;
     fetch("/api/click",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify(c)}})
       .then(function(r){{return r.json();}})
-      .then(function(j){{if(j.error)showAlert("走子",j.error);else armPoll(20);}});
+      .then(applyClickResponse);
   }});
   boardEl.addEventListener("touchstart",function(ev){{
     if(shell.classList.contains("ai-busy"))return;
@@ -516,7 +540,7 @@ def _html_page() -> str:
     if(!c)return;
     fetch("/api/click",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify(c)}})
       .then(function(r){{return r.json();}})
-      .then(function(j){{if(j.error)showAlert("走子",j.error);else armPoll(20);}});
+      .then(applyClickResponse);
   }},{{passive:false}});
   selRed.addEventListener("change",function(){{
     userFlipped=false;
@@ -634,7 +658,9 @@ def main() -> None:
         except (TypeError, ValueError):
             return json({"error": "坐标无效"}, status=400)
         err = session.click_cell(ix, iy)
-        return json(err or {})
+        if err and err.get("error"):
+            return json(err)
+        return json({"state": session.snapshot(), "messages": session.pop_client_messages()})
 
     @app.post("/api/strategies")
     async def _api_strategies(request):
