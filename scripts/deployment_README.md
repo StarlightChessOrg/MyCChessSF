@@ -6,27 +6,36 @@
 
 ```
 deployment/
-├── README.md          本说明
+├── README.md              本说明
+├── requirements.txt       网页对弈 Python 依赖（numpy、sanic）
 ├── lib/
-│   └── xqwlight_core*.so   Python 扩展（规则 + 搜索 + NNUE）
+│   ├── xqwlight_core*.so      C++ 引擎扩展（规则 + 搜索 + NNUE）
+│   └── mycchess_sf/            网页对弈 Python 包（含 static/xqwl 界面资源）
 ├── bin/
-│   └── xqwl_gen_nnue       NNUE 训练数据生成器（独立可执行）
+│   ├── mycchess-play-web      网页对弈启动脚本
+│   └── xqwl_gen_nnue          NNUE 训练数据生成器
 └── db/
-    └── BOOK.DAT            开局库（自 data/compressed_files/book.7z 解压，约 178 万条）
+    └── BOOK.DAT               开局库
 ```
 
-## 快速使用
-
-### Python 引擎 / 网页对弈
-
-在仓库根目录已 `pip install -e .` 的前提下：
+## 网页对弈（人类 vs 小巫师）
 
 ```bash
-export PYTHONPATH="$(pwd)/deployment/lib:${PYTHONPATH:-}"
-mycchess-play-web --host 0.0.0.0 --port 5151 --book "$(pwd)/deployment/db/BOOK.DAT"
+pip install -r deployment/requirements.txt
+./deployment/bin/mycchess-play-web --host 0.0.0.0 --port 5151
 ```
 
-或在 Python 中：
+默认加载 `deployment/db/BOOK.DAT`；浏览器访问 `http://<服务器>:5151/`。
+
+常用参数：
+
+```bash
+./deployment/bin/mycchess-play-web --think-ms 2000
+./deployment/bin/mycchess-play-web --no-book-default
+./deployment/bin/mycchess-play-web --book /path/to/other/BOOK.DAT
+```
+
+## Python 引擎 API
 
 ```python
 import sys
@@ -37,17 +46,15 @@ engine = xc.Engine()
 engine.load_book("deployment/db/BOOK.DAT")
 ```
 
-### NNUE 数据生成
+## NNUE 数据生成
 
 ```bash
 ./deployment/bin/xqwl_gen_nnue --output-dir nnue_data --max-positions 10000 --jobs 4
 ```
 
-无 NNUE 权重时自动使用 PST 评估；量化后可自动加载 `nnue_qINT8/output/quantized.xqnnue.bin`。
-
 ## 说明
 
-- `lib/` 放 Python 扩展 `.so`，`bin/` 放独立可执行程序，二者职责不同。
-- `BOOK.DAT` 源文件为仓库内 `data/compressed_files/book.7z`，构建时解压，**勿**在 `data/` 下单独存放解压后的库。
+- **对弈程序**即 `bin/mycchess-play-web` + `lib/mycchess_sf/`，不是单独的二进制，需 Python 3.10+ 与 `requirements.txt` 中的依赖。
+- `lib/` 放 `.so` 与 Python 包；`bin/` 放可执行脚本/程序。
 - `xqwlight_core*.so` 与构建所用 Python 版本绑定，换 Python 需重新运行 `build_linux.sh`。
-- 完整开发与 NNUE 流程见仓库 `docs/` 与根目录 `README.md`。
+- 完整开发流程见仓库 `docs/`。

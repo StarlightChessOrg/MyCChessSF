@@ -39,9 +39,10 @@ bash scripts/build_linux.sh
 
 | 路径 | 说明 |
 |------|------|
-| `deployment/lib/` | `xqwlight_core*.so`（Python 扩展） |
-| `deployment/bin/` | `xqwl_gen_nnue`（NNUE 数据生成器） |
-| `deployment/db/BOOK.DAT` | 开局库（自 `data/compressed_files/book.7z` 解压） |
+| `deployment/lib/` | `xqwlight_core*.so` + `mycchess_sf/`（网页对弈） |
+| `deployment/bin/` | `mycchess-play-web`、`xqwl_gen_nnue` |
+| `deployment/db/BOOK.DAT` | 开局库 |
+| `deployment/requirements.txt` | 对弈服务 Python 依赖 |
 | `deployment/README.md` | 部署说明 |
 
 `build_linux.sh` 默认以 **`-O3`** 编译；可覆盖：

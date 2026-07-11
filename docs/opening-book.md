@@ -9,7 +9,7 @@
 `bash scripts/build_linux.sh` 会：
 
 1. 从 `data/compressed_files/book.7z` 解压 → **`deployment/db/BOOK.DAT`**
-2. 将 `xqwlight_core*.so` 放入 **`deployment/lib/`**，`xqwl_gen_nnue` 放入 **`deployment/bin/`**
+2. 将 `xqwlight_core*.so` 与 `mycchess_sf/` 放入 **`deployment/lib/`**，`mycchess-play-web`、`xqwl_gen_nnue` 放入 **`deployment/bin/`**
 3. 生成 **`deployment/README.md`** 简要说明
 
 也可单独解压（输出同样到 `deployment/db/`）：

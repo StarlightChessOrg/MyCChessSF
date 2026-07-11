@@ -1,14 +1,23 @@
 # 网页对弈
 
-## 启动
+## 部署包内启动（无需 pip install -e .）
+
+若已运行 `bash scripts/build_linux.sh` 生成 `deployment/`：
+
+```bash
+pip install -r deployment/requirements.txt
+./deployment/bin/mycchess-play-web --host 0.0.0.0 --port 5151
+```
+
+## 开发模式启动
+
+在仓库根目录 `pip install -e .` 后：
 
 ```bash
 mycchess-play-web --host 0.0.0.0 --port 5151
 mycchess-play-web --think-ms 2000          # 每步思考毫秒数
 mycchess-play-web --no-book-default        # 启动时默认不用开局库
 ```
-
-安装方式：`pip install -e .`（见 [快速开始](getting-started.md)）。
 
 ## 默认对局设置
 

@@ -53,6 +53,12 @@ echo "[build] Packing deployment/ ..."
 rm -rf "$DEPLOY"
 mkdir -p "$DEPLOY_BIN" "$DEPLOY_LIB" "$DEPLOY_DB"
 cp -f "$ROOT/$SO_NAME" "$DEPLOY_LIB/"
+rm -rf "$DEPLOY_LIB/mycchess_sf"
+cp -a "$ROOT/mycchess_sf" "$DEPLOY_LIB/mycchess_sf"
+find "$DEPLOY_LIB/mycchess_sf" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+cp -f scripts/deployment_play_web.sh "$DEPLOY_BIN/mycchess-play-web"
+chmod +x "$DEPLOY_BIN/mycchess-play-web"
+cp -f scripts/deployment_requirements.txt "$DEPLOY/requirements.txt"
 if [[ -n "$GEN_NAME" ]]; then
   cp -f "$ROOT/$GEN_NAME" "$DEPLOY_BIN/"
   chmod +x "$DEPLOY_BIN/$GEN_NAME"
@@ -67,12 +73,14 @@ cp -f scripts/deployment_README.md "$DEPLOY/README.md"
 "$PYTHON" -m pip install -q -e .
 echo "[build] Done."
 echo "[build] Deployment: $DEPLOY"
-echo "[build]   lib/  -> $SO_NAME (Python 扩展)"
+echo "[build]   lib/  -> $SO_NAME + mycchess_sf/ (网页对弈 Python 包)"
 if [[ -n "$GEN_NAME" ]]; then
-  echo "[build]   bin/  -> $GEN_NAME"
+  echo "[build]   bin/  -> $GEN_NAME, mycchess-play-web"
+else
+  echo "[build]   bin/  -> mycchess-play-web"
 fi
 echo "[build]   db/   -> BOOK.DAT"
-echo "[build] Run web: PYTHONPATH=$DEPLOY_LIB mycchess-play-web --book $DEPLOY_DB/BOOK.DAT"
+echo "[build] Web play: pip install -r $DEPLOY/requirements.txt && $DEPLOY_BIN/mycchess-play-web --host 0.0.0.0 --port 5151"
 if [[ -n "$GEN_NAME" ]]; then
   echo "[build] NNUE data gen: $DEPLOY_BIN/xqwl_gen_nnue --output-dir nnue_data"
 fi
