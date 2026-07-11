@@ -32,6 +32,7 @@ STRATEGY_HUMAN = "人类"
 STRATEGY_XQWL = "象棋小巫师"
 STRATEGIES = (STRATEGY_HUMAN, STRATEGY_XQWL)
 AI_THINK_DELAY_SEC = 0.45
+AI_VS_AI_MIN_STEP_SEC = 0.5
 
 
 def _piece_side(ch: str | None) -> str | None:
@@ -63,6 +64,7 @@ class XqwlWebSession:
         self._toasts: list[dict[str, str]] = []
         self._sounds: list[str] = []
         self._ai_busy = False
+        self._ai_pending = False
         self._think_log: list[dict[str, object]] = []
         self._ai_thinking: str = ""
         self._ai_timer: threading.Timer | None = None
@@ -71,9 +73,15 @@ class XqwlWebSession:
         if self._ai_timer is not None:
             self._ai_timer.cancel()
             self._ai_timer = None
+        self._ai_pending = False
 
     def _schedule_ai_after_human_move(self) -> None:
         self._cancel_ai_timer()
+        with self._lock:
+            side = self.game.get_side()
+            strat = self.strategy_red if side == "red" else self.strategy_black
+            if strat == STRATEGY_XQWL:
+                self._ai_pending = True
         self._ai_timer = threading.Timer(AI_THINK_DELAY_SEC, self._ai_timer_fire)
         self._ai_timer.daemon = True
         self._ai_timer.start()
@@ -169,6 +177,9 @@ class XqwlWebSession:
             return True
         return False
 
+    def _both_ai(self) -> bool:
+        return self.strategy_red == STRATEGY_XQWL and self.strategy_black == STRATEGY_XQWL
+
     def snapshot(self) -> dict:
         with self._lock:
             arr = self._raw_board()
@@ -190,6 +201,9 @@ class XqwlWebSession:
                         )
                 rows.append(row)
             side = self.game.get_side()
+            cur_strat = self.strategy_red if side == "red" else self.strategy_black
+            human_turn = cur_strat == STRATEGY_HUMAN
+            input_locked = self._ai_busy or self._ai_pending or not human_turn
             lm_view: list[int] | None = None
             if self.last_move:
                 x1, y1, x2, y2 = self.last_move
@@ -208,7 +222,9 @@ class XqwlWebSession:
                 "book_size": int(self._engine.book_size()) if self._book_available else 0,
                 "status_text": f"轮到 {'红方' if side == 'red' else '黑方'} 走棋",
                 "ai_busy": self._ai_busy,
-                "current_strategy": self.strategy_red if side == "red" else self.strategy_black,
+                "ai_pending": self._ai_pending,
+                "input_locked": input_locked,
+                "current_strategy": cur_strat,
                 "ai_thinking": self._ai_thinking,
                 "think_log": list(self._think_log[-60:]),
                 "board_w": BOARD_WIDTH,
@@ -258,7 +274,7 @@ class XqwlWebSession:
     def click_cell(self, ix: int, iy: int) -> dict | None:
         """Handle a click; ``iy`` is board_view row (0=black top, 9=red bottom)."""
         with self._lock:
-            if self._ai_busy:
+            if self._ai_busy or self._ai_pending:
                 return {"error": "小巫师思考中"}
             side = self.game.get_side()
             strat = self.strategy_red if side == "red" else self.strategy_black
@@ -318,10 +334,12 @@ class XqwlWebSession:
             if not self.game.legal_moves_iccs_str():
                 return
             self._ai_busy = True
+            self._ai_pending = False
             g_copy = self.game.copy()
             think_ms = self._think_ms
             engine = self._engine
             use_book = self._use_book and self._book_available
+            both_ai = self._both_ai()
 
         def worker() -> None:
             mv = ""
@@ -338,9 +356,14 @@ class XqwlWebSession:
             except Exception as e:
                 with self._lock:
                     self._ai_busy = False
+                    self._ai_pending = False
                     self._ai_thinking = ""
                     self._toasts.append({"kind": "info", "title": "小巫师错误", "body": str(e)})
                 return
+            if both_ai:
+                pad = AI_VS_AI_MIN_STEP_SEC - elapsed / 1000.0
+                if pad > 0:
+                    time.sleep(pad)
             with self._lock:
                 self._ai_busy = False
                 self._ai_thinking = ""
@@ -383,10 +406,10 @@ def _html_page() -> str:
     *{{box-sizing:border-box}}
     body{{margin:0;font-family:"Microsoft YaHei","SimSun",serif;color:var(--text);
       background:var(--bg);min-height:100vh}}
-    .win{{max-width:1180px;margin:0 auto;padding:12px 16px 20px}}
+    .win{{max-width:1280px;margin:0 auto;padding:12px 16px 20px}}
     .titlebar{{font-size:15px;font-weight:600;margin-bottom:10px}}
-    .layout{{display:grid;grid-template-columns:minmax(200px,260px) minmax(0,1fr) 280px;gap:16px;align-items:start}}
-    @media(max-width:1100px){{.layout{{grid-template-columns:1fr}} .think-panel{{order:3}}}}
+    .layout{{display:grid;grid-template-columns:minmax(300px,340px) minmax(0,1fr) 260px;gap:16px;align-items:start}}
+    @media(max-width:1180px){{.layout{{grid-template-columns:1fr}} .think-panel{{order:3}}}}
     .board-wrap{{display:flex;justify-content:center}}
     .board-shell{{background:#8b7355;padding:6px;border:1px solid #5c4a32;box-shadow:0 2px 8px rgba(0,0,0,.25)}}
     #board{{position:relative;width:min(var(--bw),calc(100vw - 36px));aspect-ratio:{bw} / {bh};
@@ -407,13 +430,27 @@ def _html_page() -> str:
     .think-panel h2{{font-size:15px;margin:0 0 8px}}
     .think-panel .hint{{font-size:12px;color:#5c4a32;margin-bottom:10px}}
     #think-log-body{{font-family:Consolas,"Microsoft YaHei",monospace;font-size:11px;line-height:1.5;
-      max-height:min(560px,calc(100vh - 120px));overflow:auto;background:rgba(255,255,255,.45);
-      padding:8px;border:1px solid #c9b89a}}
-    .think-line{{margin:0 0 8px;white-space:pre-wrap;word-break:break-word}}
+      max-height:min(560px,calc(100vh - 120px));overflow:auto;overflow-x:auto;background:rgba(255,255,255,.45);
+      padding:8px;border:1px solid #c9b89a;min-width:0}}
+    .think-line{{margin:0 0 6px;white-space:nowrap}}
     #status{{margin-top:12px;font-size:13px;min-height:3.5em;white-space:pre-wrap}}
     #ai-thinking{{font-size:12px;color:#7a4b00;min-height:1.6em;margin-top:8px}}
-    .ai-busy #board{{opacity:.94}}
-    .ai-busy #board{{pointer-events:none}}
+    .input-locked #board{{opacity:.94;pointer-events:none}}
+    .dialog-overlay{{position:fixed;inset:0;background:rgba(20,14,8,.45);display:flex;align-items:center;
+      justify-content:center;z-index:1000;padding:16px}}
+    .dialog-overlay.hidden{{display:none}}
+    .dialog-box{{background:var(--panel);border:1px solid #8b7355;box-shadow:0 4px 20px rgba(0,0,0,.35);
+      min-width:min(360px,92vw);max-width:440px;padding:18px 20px 16px}}
+    .dialog-title{{font-size:15px;font-weight:600;margin:0 0 10px}}
+    .dialog-body{{font-size:13px;line-height:1.55;color:#3d2f1f;margin:0 0 16px;white-space:pre-wrap}}
+    .dialog-actions{{display:flex;justify-content:flex-end;gap:8px}}
+    .dialog-actions button{{width:auto;min-width:72px;margin:0;padding:7px 16px}}
+    .toast-stack{{position:fixed;top:14px;right:14px;z-index:1001;display:flex;flex-direction:column;gap:8px;
+      max-width:min(360px,calc(100vw - 28px));pointer-events:none}}
+    .toast-item{{background:var(--panel);border:1px solid #b9a88d;box-shadow:0 2px 10px rgba(0,0,0,.2);
+      padding:10px 14px;font-size:13px;line-height:1.45;opacity:1;transition:opacity .25s}}
+    .toast-item.fade{{opacity:0}}
+    .toast-item strong{{display:block;font-size:14px;margin-bottom:4px}}
   </style>
 </head>
 <body>
@@ -447,6 +484,14 @@ def _html_page() -> str:
       </div>
     </div>
   </div>
+  <div id="dialog-overlay" class="dialog-overlay hidden" role="dialog" aria-modal="true">
+    <div class="dialog-box">
+      <div class="dialog-title" id="dialog-title"></div>
+      <div class="dialog-body" id="dialog-body"></div>
+      <div class="dialog-actions"><button type="button" id="dialog-ok">确定</button></div>
+    </div>
+  </div>
+  <div id="toast-stack" class="toast-stack"></div>
 <script>
 (function(){{
   const BW={bw}, BH={bh}, SQ={sq}, EDGE={edge};
@@ -457,7 +502,11 @@ def _html_page() -> str:
   const chkBook=document.getElementById("chk-book"), bookRow=document.getElementById("book-row");
   const chkSound=document.getElementById("chk-sound");
   const aiThinkingEl=document.getElementById("ai-thinking"), thinkLogBody=document.getElementById("think-log-body");
-  let viewFlipY=false, userFlipped=false, pollTimer=null, lastSnap=null;
+  const dialogOverlay=document.getElementById("dialog-overlay"), dialogTitle=document.getElementById("dialog-title");
+  const dialogBody=document.getElementById("dialog-body"), dialogOk=document.getElementById("dialog-ok");
+  const toastStack=document.getElementById("toast-stack");
+  let viewFlipY=false, userFlipped=false, pollTimer=null, pollInFlight=false, lastSnap=null;
+  let lastBoardKey=null, lastThinkLogKey=null;
   const sounds={{}};
   ["click","illegal","move","move2","capture","capture2","check","check2","win","draw","loss"].forEach(function(n){{
     sounds[n]=new Audio("/static/xqwl/"+n+".wav");
@@ -469,7 +518,32 @@ def _html_page() -> str:
       a.currentTime=0; a.play().catch(function(){{}}); a.onended=next; }}
     next();
   }}
-  function showAlert(t,b){{alert(t+"\\n\\n"+b);}}
+  function showAlert(t,b){{
+    if(!dialogOverlay)return;
+    dialogTitle.textContent=t||"提示";
+    dialogBody.textContent=b||"";
+    dialogOverlay.classList.remove("hidden");
+    dialogOk.focus();
+  }}
+  function hideAlert(){{if(dialogOverlay)dialogOverlay.classList.add("hidden");}}
+  if(dialogOk)dialogOk.addEventListener("click",hideAlert);
+  if(dialogOverlay)dialogOverlay.addEventListener("click",function(ev){{
+    if(ev.target===dialogOverlay)hideAlert();
+  }});
+  document.addEventListener("keydown",function(ev){{
+    if(ev.key==="Escape"&&!dialogOverlay.classList.contains("hidden"))hideAlert();
+  }});
+  function showToast(t,b,ms){{
+    if(!toastStack)return;
+    var el=document.createElement("div");
+    el.className="toast-item";
+    el.innerHTML="<strong></strong><span></span>";
+    el.querySelector("strong").textContent=t||"提示";
+    el.querySelector("span").textContent=b||"";
+    toastStack.appendChild(el);
+    setTimeout(function(){{el.classList.add("fade");}},ms||3200);
+    setTimeout(function(){{if(el.parentNode)el.parentNode.removeChild(el);}},(ms||3200)+300);
+  }}
   function fillStrategiesOnce(strategies){{
     if(selRed.options.length>0)return;
     strategies.forEach(function(t){{var o=document.createElement("option");o.value=o.textContent=t;selRed.appendChild(o);}});
@@ -487,7 +561,15 @@ def _html_page() -> str:
     d.style.backgroundImage="url("+url+")";
     layer.appendChild(d);
   }}
+  function boardRenderKey(snap){{
+    var sel=snap.sel_from?snap.sel_from.join(","):"";
+    var lm=snap.last_move?snap.last_move.join(","):"";
+    return (snap.visual_sig||"")+"|"+sel+"|"+lm+"|"+(viewFlipY?"1":"0");
+  }}
   function renderBoard(snap){{
+    var key=boardRenderKey(snap);
+    if(key===lastBoardKey)return;
+    lastBoardKey=key;
     layer.replaceChildren();
     for(var iy=0;iy<10;iy++)for(var ix=0;ix<9;ix++){{
       var sq=snap.board[iy][ix];
@@ -501,14 +583,23 @@ def _html_page() -> str:
   }}
   function renderThinkLog(entries){{
     if(!thinkLogBody)return;
+    entries=entries||[];
+    var key=entries.length+"|"+(entries.length?entries[entries.length-1].text:"");
+    if(key===lastThinkLogKey)return;
+    lastThinkLogKey=key;
     thinkLogBody.replaceChildren();
-    (entries||[]).forEach(function(e){{
+    entries.forEach(function(e){{
       var line=document.createElement("div");
       line.className="think-line";
       line.textContent=e.text||"";
       thinkLogBody.appendChild(line);
     }});
     thinkLogBody.scrollTop=thinkLogBody.scrollHeight;
+  }}
+  function isInputLocked(snap){{
+    if(!snap)return true;
+    if(typeof snap.input_locked==="boolean")return snap.input_locked;
+    return !!(snap.ai_busy||snap.ai_pending);
   }}
   function applySnap(snap){{
     fillStrategiesOnce(snap.strategies||[]);
@@ -521,23 +612,35 @@ def _html_page() -> str:
       if(avail)chkBook.checked=!!snap.use_book;
     }}
     statusEl.textContent=snap.status_text||"";
-    if(aiThinkingEl)aiThinkingEl.textContent=snap.ai_thinking||"";
+    if(aiThinkingEl){{
+      if(snap.ai_thinking)aiThinkingEl.textContent=snap.ai_thinking;
+      else if(snap.ai_pending)aiThinkingEl.textContent="小巫师即将应招…";
+      else aiThinkingEl.textContent="";
+    }}
     renderThinkLog(snap.think_log||[]);
     renderBoard(snap);
-    shell.classList.toggle("ai-busy",!!snap.ai_busy);
+    shell.classList.toggle("input-locked",isInputLocked(snap));
     lastSnap=snap;
   }}
   function handleMessages(msg){{
     playSounds(msg.sounds||[]);
-    (msg.toasts||[]).forEach(function(t){{if(t.kind==="info")showAlert(t.title||"提示",t.body||"");}});
+    (msg.toasts||[]).forEach(function(t){{
+      if(t.kind==="info"){{
+        if(t.title==="终局")showAlert(t.title||"提示",t.body||"");
+        else showToast(t.title||"提示",t.body||"",3500);
+      }}
+    }});
   }}
   function armPoll(ms){{if(pollTimer)clearTimeout(pollTimer);pollTimer=setTimeout(onePoll,ms);}}
   function onePoll(){{
+    if(pollInFlight){{armPoll(300);return;}}
     pollTimer=null;
+    pollInFlight=true;
     Promise.all([fetch("/api/state",{{cache:"no-store"}}).then(function(r){{return r.json();}}),
       fetch("/api/messages",{{cache:"no-store"}}).then(function(r){{return r.json();}})])
-      .then(function(pair){{applySnap(pair[0]);handleMessages(pair[1]);armPoll(pair[0].ai_busy?120:300);}})
-      .catch(function(){{armPoll(700);}});
+      .then(function(pair){{applySnap(pair[0]);handleMessages(pair[1]);armPoll(isInputLocked(pair[0])?120:300);}})
+      .catch(function(){{armPoll(700);}})
+      .then(function(){{pollInFlight=false;}});
   }}
   function clickFromEvent(ev){{
     var rect=boardEl.getBoundingClientRect();
@@ -549,12 +652,12 @@ def _html_page() -> str:
     return {{ix:ix, iy:srvY(iyVis)}};  // board_view row for server
   }}
   function applyClickResponse(j){{
-    if(j.error){{showAlert("走子",j.error);return;}}
+    if(j.error){{showToast("走子",j.error,2800);return;}}
     if(j.state){{applySnap(j.state);handleMessages(j.messages||{{}});}}
-    armPoll(j.state&&j.state.ai_busy?120:280);
+    armPoll(j.state&&isInputLocked(j.state)?120:280);
   }}
   boardEl.addEventListener("click",function(ev){{
-    if(shell.classList.contains("ai-busy"))return;
+    if(shell.classList.contains("input-locked"))return;
     var c=clickFromEvent(ev);
     if(!c)return;
     fetch("/api/click",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify(c)}})
@@ -562,7 +665,7 @@ def _html_page() -> str:
       .then(applyClickResponse);
   }});
   boardEl.addEventListener("touchstart",function(ev){{
-    if(shell.classList.contains("ai-busy"))return;
+    if(shell.classList.contains("input-locked"))return;
     if(!ev.changedTouches||!ev.changedTouches.length)return;
     ev.preventDefault();
     var t=ev.changedTouches[0];
@@ -586,6 +689,8 @@ def _html_page() -> str:
   }});
   btnNew.addEventListener("click",function(){{
     userFlipped=false;
+    lastBoardKey=null;
+    lastThinkLogKey=null;
     fetch("/api/new_game",{{method:"POST"}}).then(function(r){{return r.json();}}).then(function(){{armPoll(20);}});
   }});
   function updateFlipButton(){{
@@ -594,6 +699,7 @@ def _html_page() -> str:
   btnFlip.addEventListener("click",function(){{
     userFlipped=true;
     viewFlipY=!viewFlipY;
+    lastBoardKey=null;
     updateFlipButton();
     if(lastSnap)renderBoard(lastSnap);
   }});
