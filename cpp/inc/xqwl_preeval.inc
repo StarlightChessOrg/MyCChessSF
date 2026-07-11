@@ -105,6 +105,44 @@ static int attackWeight(const PositionStruct &pos, int sd) {
   return clampInt(n, 0, kCap);
 }
 
+/** Attack index for pawn PST: major pieces only, capped and damped (no pawn feedback loop). */
+static int pawnAttackWeight(const PositionStruct &pos, int sd) {
+  constexpr int kCap = PAWN_ATTACK_BLEND_CAP;
+  int n = 0;
+  for (int sq = 0; sq < 256; ++sq) {
+    if (!IN_BOARD(sq)) {
+      continue;
+    }
+    const BYTE pc = pos.ucpcSquares[sq];
+    if (pc == 0) {
+      continue;
+    }
+    const BOOL ours = (pc < 16) ? (sd == 0) : (sd == 1);
+    if (!ours || !AWAY_HALF(sq, sd)) {
+      continue;
+    }
+    const int kind = (pc < 16) ? pc - 8 : pc - 16;
+    if (kind == PIECE_KNIGHT || kind == PIECE_ROOK) {
+      n += 2;
+    } else if (kind == PIECE_CANNON) {
+      n += 1;
+    }
+  }
+  const int selfMajor = majorValue(pos, sd);
+  const int oppMajor = majorValue(pos, 1 - sd);
+  if (selfMajor > oppMajor) {
+    n += (selfMajor - oppMajor);
+  }
+  return clampInt(n, 0, kCap);
+}
+
+inline int pawnSquareValue(const Context &ctx, int pc, int sqBase) {
+  const int ownAtk = (pc < 16) ? ctx.whitePawnAttack : ctx.blackPawnAttack;
+  const int less = ctx.pawnLess[sqBase];
+  const int blended = lerp(ctx.pawnAtt[sqBase], less, ownAtk, PAWN_ATTACK_BLEND_CAP);
+  return less + (blended - less) * PAWN_ATTACK_GAIN_NUM / PAWN_ATTACK_GAIN_DEN;
+}
+
 inline int pieceSquareValue(const Context &ctx, int pc, int sq) {
   const int pt = (pc < 16) ? pc - 8 : pc - 16;
   const int sqBase = (pc < 16) ? sq : SQUARE_FLIP(sq);
@@ -122,10 +160,8 @@ inline int pieceSquareValue(const Context &ctx, int pc, int sq) {
       return ctx.rook[sqBase];
     case PIECE_CANNON:
       return ctx.cannon[sqBase];
-    case PIECE_PAWN: {
-      const int ownAtk = (pc < 16) ? ctx.whiteAttack : ctx.blackAttack;
-      return lerp(ctx.pawnAtt[sqBase], ctx.pawnLess[sqBase], ownAtk, 8);
-    }
+    case PIECE_PAWN:
+      return pawnSquareValue(ctx, pc, sqBase);
     default:
       return 0;
   }
@@ -140,6 +176,8 @@ inline void refresh(PositionStruct &pos) {
   ctx.midgame = midgameWeight(pos);
   ctx.whiteAttack = attackWeight(pos, 0);
   ctx.blackAttack = attackWeight(pos, 1);
+  ctx.whitePawnAttack = pawnAttackWeight(pos, 0);
+  ctx.blackPawnAttack = pawnAttackWeight(pos, 1);
   ctx.vlAdvanced = (ADVANCED_VALUE * ctx.midgame + kMidTotal / 2) / kMidTotal;
 
   for (int sq = 0; sq < 256; ++sq) {

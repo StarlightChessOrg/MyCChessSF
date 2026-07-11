@@ -9,6 +9,8 @@ struct Context {
   int midgame = 0;
   int whiteAttack = 0;
   int blackAttack = 0;
+  int whitePawnAttack = 0; // major-piece attack only; damped for pawn PST
+  int blackPawnAttack = 0;
   BYTE king[256];
   BYTE knight[256];
   BYTE rook[256];

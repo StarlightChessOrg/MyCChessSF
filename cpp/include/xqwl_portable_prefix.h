@@ -60,3 +60,8 @@ const int IID_MIN_DEPTH = 4;
 const int SINGULAR_MIN_DEPTH = 6;
 const int SINGULAR_MARGIN = 12;
 const int BOOK_MAX_ENTRIES = 5000000; // max opening-book lines loaded into RAM
+
+// Dynamic PST pawn tuning (standalone PST without ElephantEye lazy eval)
+const int PAWN_ATTACK_BLEND_CAP = 4; // max attacking blend weight (of 8) for pawns
+const int PAWN_ATTACK_GAIN_NUM = 13;  // apply this fraction of the att-less delta
+const int PAWN_ATTACK_GAIN_DEN = 20;
