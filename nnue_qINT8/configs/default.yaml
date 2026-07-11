@@ -1,0 +1,13 @@
+checkpoint: ../nnue_training/checkpoints/best.pt
+data:
+  source: ../nnue_data
+  pattern: "worker_*.txt"
+  max_samples: 10000
+
+quantize:
+  batch_size: 2048
+  num_workers: 4
+  prefetch_factor: 2
+  device: cpu
+
+output: output/quantized.xqint8.pt

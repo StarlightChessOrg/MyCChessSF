@@ -203,6 +203,7 @@ cython_debug/
 # NNUE training outputs and generated data
 nnue_data/
 nnue_training/checkpoints/
+nnue_qINT8/output/
 
 # Temporary file for partial code execution
 scripts/_xqwl_res_cache/
