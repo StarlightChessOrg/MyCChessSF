@@ -24,11 +24,13 @@ namespace {
 constexpr int kIoBufferBytes = 256 * 1024;
 constexpr long long kProgressEveryPositions = 10000;
 constexpr long long kDefaultMaxPositions = 10'000'000LL;
+constexpr int kDefaultMaxDepth = 6;
 
 struct GenConfig {
   std::string output_dir = "nnue_data";
   long long max_positions = kDefaultMaxPositions;
   int think_ms = 100;
+  int max_depth = kDefaultMaxDepth;
   int jobs = 0;
   int random_pct = 20;
   std::string nnue_path;
@@ -42,6 +44,7 @@ void usage(const char *prog) {
                "  --output-dir DIR       Output directory (default: nnue_data)\n"
                "  --max-positions N      Total position cap (default: 10000000)\n"
                "  --think-ms MS          Search time per position (default: 100)\n"
+               "  --max-depth N          Max iterative deepening depth (default: 6)\n"
                "  --jobs N               Parallel workers (0 = CPU cores, default: 0)\n"
                "  --random-pct PCT       Random move probability 0-100 (default: 20)\n"
                "  --nnue PATH            NNUE weights (.xqnnue.bin); auto-detect if omitted\n"
@@ -117,6 +120,12 @@ bool parse_args(int argc, char **argv, GenConfig &cfg) {
       const char *v = need(arg);
       if (v == nullptr || !parse_i32(v, cfg.think_ms) || cfg.think_ms < 1) {
         std::fprintf(stderr, "Invalid --think-ms\n");
+        return false;
+      }
+    } else if (std::strcmp(arg, "--max-depth") == 0) {
+      const char *v = need(arg);
+      if (v == nullptr || !parse_i32(v, cfg.max_depth) || cfg.max_depth < 1 || cfg.max_depth > LIMIT_DEPTH) {
+        std::fprintf(stderr, "Invalid --max-depth (1-%d)\n", LIMIT_DEPTH);
         return false;
       }
     } else if (std::strcmp(arg, "--jobs") == 0) {
@@ -302,7 +311,7 @@ void worker_main(int worker_id, long long quota, const GenConfig &cfg) {
       }
       PositionStruct search_pos = pos;
       const XqwlSearchOutcome search =
-          XqwlSearchBestMoveEx(search_pos, *tab, cfg.think_ms, /*use_book=*/false);
+          XqwlSearchBestMoveEx(search_pos, *tab, cfg.think_ms, /*use_book=*/false, cfg.max_depth);
 
       std::fprintf(fp, "%s\t%d\n", fen.c_str(), search.score);
       ++written;
@@ -358,8 +367,8 @@ int main(int argc, char **argv) {
   const long long base = cfg.max_positions / jobs;
   const long long rem = cfg.max_positions % jobs;
   std::fprintf(stderr,
-               "[xqwl_gen_nnue] output=%s positions=%lld jobs=%d think_ms=%d random_pct=%d%%\n",
-               cfg.output_dir.c_str(), cfg.max_positions, jobs, cfg.think_ms, cfg.random_pct);
+               "[xqwl_gen_nnue] output=%s positions=%lld jobs=%d think_ms=%d max_depth=%d random_pct=%d%%\n",
+               cfg.output_dir.c_str(), cfg.max_positions, jobs, cfg.think_ms, cfg.max_depth, cfg.random_pct);
   if (cfg.nnue_path.empty()) {
     std::fprintf(stderr, "[xqwl_gen_nnue] eval=PST (no NNUE weights found; use --nnue PATH or --pst-only)\n");
   } else {

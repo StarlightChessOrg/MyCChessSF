@@ -48,6 +48,7 @@ struct XqwlSearchCtx {
   int time_limit_ms;
   std::chrono::steady_clock::time_point t_start;
   bool use_book;
+  int max_depth;
   int nLastDepth;
   int nLastScore;
   bool from_book;
@@ -630,7 +631,7 @@ static void SearchMain(void) {
     return;
   }
 
-  for (i = 1; i <= LIMIT_DEPTH; i++) {
+  for (i = 1; i <= ((g_xqwl_sc->max_depth > 0) ? g_xqwl_sc->max_depth : LIMIT_DEPTH); i++) {
     int delta = ASPIRATION_DELTA;
     int alpha = g_xqwl_sc->nLastScore - delta;
     int beta = g_xqwl_sc->nLastScore + delta;
@@ -671,11 +672,18 @@ struct XqwlSearchOutcome {
 
 /** Search best move on a copy of ``position``; ``tables`` holds TT/book across calls. */
 inline XqwlSearchOutcome XqwlSearchBestMoveEx(PositionStruct &position, XqwlSearchTables &tables, int time_limit_ms,
-                                              bool use_book = true) {
+                                              bool use_book = true, int max_depth = 0) {
   if (time_limit_ms < 50) {
     time_limit_ms = 50;
   }
-  XqwlSearchCtx ctx{&position, &tables, time_limit_ms, std::chrono::steady_clock::now(), use_book, 0, 0, false, {}};
+  if (max_depth < 0) {
+    max_depth = 0;
+  }
+  if (max_depth > LIMIT_DEPTH) {
+    max_depth = LIMIT_DEPTH;
+  }
+  XqwlSearchCtx ctx{&position, &tables, time_limit_ms, std::chrono::steady_clock::now(),
+                    use_book, max_depth, 0, 0, false, {}};
   g_xqwl_sc = &ctx;
   ctx.nLastScore = XqwlEvalForSearch(position);
   tables.mvResult = 0;
