@@ -72,4 +72,9 @@ pybind11_add_module(xqwlight_core MODULE bindings.cpp)
 target_include_directories(xqwlight_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_options(xqwlight_core PRIVATE -Wall -Wextra -Wno-sign-compare -fPIC)
 
+add_executable(xqwl_gen_nnue gen_nnue_main.cpp)
+target_include_directories(xqwl_gen_nnue PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_options(xqwl_gen_nnue PRIVATE -Wall -Wextra -Wno-sign-compare)
+
 install(TARGETS xqwlight_core LIBRARY DESTINATION .)
+install(TARGETS xqwl_gen_nnue RUNTIME DESTINATION .)

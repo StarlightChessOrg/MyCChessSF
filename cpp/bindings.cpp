@@ -7,6 +7,7 @@
 
 #include "xqwl_portable_prefix.h"
 #include "xqwl_portable.cpp"
+#include "xqwl_fen.inc"
 
 namespace {
 
@@ -42,49 +43,6 @@ std::optional<int> iccs_to_move(const std::string &s) {
   if (x1 < 0 || x1 > 8 || y1 < 0 || y1 > 9 || x2 < 0 || x2 > 8 || y2 < 0 || y2 > 9)
     return std::nullopt;
   return MOVE(COORD_XY_ICCS(x1, y1), COORD_XY_ICCS(x2, y2));
-}
-
-char piece_to_fen_char(BYTE pc) {
-  if (!pc)
-    return '\0';
-  static const char *RED = "KABNRCP";
-  static const char *BLK = "kabnrcp";
-  if (pc < 16) {
-    int t = int(pc) - 8;
-    if (t < 0 || t > 6)
-      return '?';
-    return RED[t];
-  }
-  int t = int(pc) - 16;
-  if (t < 0 || t > 6)
-    return '?';
-  return BLK[t];
-}
-
-std::string position_to_fen(const PositionStruct &pst) {
-  std::string fen;
-  for (int y = 0; y < 10; ++y) {
-    int empty = 0;
-    for (int x = 0; x < 9; ++x) {
-      int sq = COORD_XY_ICCS(x, y);
-      BYTE pc = pst.ucpcSquares[sq];
-      if (!pc) {
-        ++empty;
-        continue;
-      }
-      if (empty) {
-        fen += char('0' + empty);
-        empty = 0;
-      }
-      fen += piece_to_fen_char(pc);
-    }
-    if (empty)
-      fen += char('0' + empty);
-    if (y < 9)
-      fen += '/';
-  }
-  fen += (pst.sdPlayer == 0) ? " w - - 0 1" : " b - - 0 1";
-  return fen;
 }
 
 } // namespace
@@ -182,7 +140,7 @@ struct XQWLPosition {
     return 0;
   }
 
-  std::string fen() const { return position_to_fen(board); }
+  std::string fen() const { return xqwl_position_to_fen(board); }
 
   int side_to_move() const { return board.sdPlayer; }
 
@@ -219,6 +177,7 @@ struct XQWLEngine {
     py::dict d;
     d["iccs"] = out.mv != 0 ? mv_to_iccs(out.mv) : "";
     d["depth"] = out.depth;
+    d["score"] = out.score;
     d["from_book"] = out.from_book;
     return d;
   }

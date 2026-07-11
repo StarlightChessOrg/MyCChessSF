@@ -34,6 +34,7 @@ struct XqwlSearchCtx {
   clock_t t_start;
   bool use_book;
   int nLastDepth;
+  int nLastScore;
   bool from_book;
 };
 
@@ -444,6 +445,7 @@ static void SearchMain(void) {
       g_xqwl_sc->t_start + static_cast<clock_t>(g_xqwl_sc->time_limit_ms) * CLOCKS_PER_SEC / 1000;
 
   g_xqwl_sc->nLastDepth = 0;
+  g_xqwl_sc->nLastScore = XQWL_SEARCH_POS.Evaluate();
   g_xqwl_sc->from_book = false;
   std::memset(XQWL_SEARCH_TAB.nHistoryTable, 0, 65536 * sizeof(int));
   std::memset(XQWL_SEARCH_TAB.mvKillers, 0, LIMIT_DEPTH * 2 * sizeof(int));
@@ -458,6 +460,7 @@ static void SearchMain(void) {
           XQWL_SEARCH_POS.UndoMakeMove();
           g_xqwl_sc->from_book = true;
           g_xqwl_sc->nLastDepth = 0;
+          g_xqwl_sc->nLastScore = XQWL_SEARCH_POS.Evaluate();
           return;
         }
         XQWL_SEARCH_POS.UndoMakeMove();
@@ -475,12 +478,15 @@ static void SearchMain(void) {
     }
   }
   if (vl == 1) {
+    g_xqwl_sc->nLastDepth = 1;
+    g_xqwl_sc->nLastScore = SearchRoot(1);
     return;
   }
 
   for (i = 1; i <= LIMIT_DEPTH; i++) {
     vl = SearchRoot(i);
     g_xqwl_sc->nLastDepth = i;
+    g_xqwl_sc->nLastScore = vl;
     if (vl > WIN_VALUE || vl < -WIN_VALUE) {
       break;
     }
@@ -490,10 +496,11 @@ static void SearchMain(void) {
   }
 }
 
-/** Outcome of a search call (move + completed depth + book flag). */
+/** Outcome of a search call (move + completed depth + root score + book flag). */
 struct XqwlSearchOutcome {
   int mv;
   int depth;
+  int score;
   bool from_book;
 };
 
@@ -503,11 +510,11 @@ inline XqwlSearchOutcome XqwlSearchBestMoveEx(PositionStruct &position, XqwlSear
   if (time_limit_ms < 50) {
     time_limit_ms = 50;
   }
-  XqwlSearchCtx ctx{&position, &tables, time_limit_ms, std::clock(), use_book, 0, false};
+  XqwlSearchCtx ctx{&position, &tables, time_limit_ms, std::clock(), use_book, 0, position.Evaluate(), false};
   g_xqwl_sc = &ctx;
   tables.mvResult = 0;
   SearchMain();
-  const XqwlSearchOutcome out{tables.mvResult, ctx.nLastDepth, ctx.from_book};
+  const XqwlSearchOutcome out{tables.mvResult, ctx.nLastDepth, ctx.nLastScore, ctx.from_book};
   g_xqwl_sc = nullptr;
   return out;
 }
