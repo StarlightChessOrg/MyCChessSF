@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 import threading
 import time
@@ -544,10 +545,11 @@ def main() -> None:
         return json(err or {})
 
     @app.after_server_start
-    async def _kick_ai(_app, _loop):
+    async def _kick_ai(_app):
         await asyncio.sleep(0.2)
         session.maybe_ai()
 
+    os.environ.setdefault("SANIC_IGNORE_PRODUCTION_WARNING", "1")
     print(f"[play] http://{args.host}:{args.port}/  (象棋小巫师 XQWL06)", flush=True)
     app.run(host=str(args.host), port=int(args.port), single_process=True, access_log=False, motd=False)
 
