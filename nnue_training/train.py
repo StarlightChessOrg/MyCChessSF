@@ -239,11 +239,15 @@ def main() -> None:
     criterion = nn.MSELoss()
 
     best_val = math.inf
-    epochs = train_cfg["epochs"]
+    max_epochs = int(train_cfg.get("max_epochs", train_cfg.get("epochs", 384)))
+    patience = int(train_cfg.get("early_stopping_patience", 32))
     log_every = train_cfg.get("log_every", 50)
+    epochs_without_improvement = 0
 
-    for epoch in range(1, epochs + 1):
-        print(f"\n=== epoch {epoch}/{epochs} ===")
+    print(f"[train] max_epochs={max_epochs}  early_stopping_patience={patience}")
+
+    for epoch in range(1, max_epochs + 1):
+        print(f"\n=== epoch {epoch}/{max_epochs} ===")
         train_loss = train_epoch(
             model,
             train_loader,
@@ -283,6 +287,7 @@ def main() -> None:
 
         if val_loss < best_val:
             best_val = val_loss
+            epochs_without_improvement = 0
             save_checkpoint(
                 ckpt_dir / "best.pt",
                 model=model,
@@ -294,6 +299,18 @@ def main() -> None:
                 config=cfg,
             )
             print(f"  saved best.pt  val_loss={val_loss:.6f}")
+        else:
+            epochs_without_improvement += 1
+            print(
+                f"  no val_loss improvement  "
+                f"({epochs_without_improvement}/{patience})"
+            )
+            if epochs_without_improvement >= patience:
+                print(
+                    f"\n[early stop] patience={patience} reached at epoch {epoch}  "
+                    f"best val_loss={best_val:.6f}"
+                )
+                break
 
     print(f"\n[done] best val_loss={best_val:.6f}")
     print(f"checkpoints: {ckpt_dir / 'best.pt'} , {ckpt_dir / 'last.pt'}")

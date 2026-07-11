@@ -11,7 +11,8 @@ model:
 
 train:
   batch_size: 2048
-  epochs: 5
+  max_epochs: 384
+  early_stopping_patience: 32
   lr: 0.001
   weight_decay: 0.0
   num_workers: 4
