@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <chrono>
+#include <cmath>
 #include <vector>
 
 struct HashItem {
@@ -722,20 +723,47 @@ static void SearchMain(void) {
   }
 
   for (i = 1; i <= ((g_xqwl_sc->max_depth > 0) ? g_xqwl_sc->max_depth : LIMIT_DEPTH); i++) {
-    int delta = ASPIRATION_DELTA;
-    int alpha = g_xqwl_sc->nLastScore - delta;
-    int beta = g_xqwl_sc->nLastScore + delta;
-    while (true) {
-      vl = SearchRoot(i, alpha, beta);
-      if (vl <= alpha) {
-        alpha = -MATE_VALUE;
-      } else if (vl >= beta) {
-        beta = MATE_VALUE;
-      } else {
-        break;
+    if (i < ASPIRATION_MIN_DEPTH) {
+      vl = SearchRoot(i, -MATE_VALUE, MATE_VALUE);
+    } else {
+      int delta = ASPIRATION_DELTA_INIT + std::abs(g_xqwl_sc->nLastScore) / 32;
+      if (delta > ASPIRATION_DELTA_MAX) {
+        delta = ASPIRATION_DELTA_MAX;
       }
-      if (alpha <= -WIN_VALUE && beta >= WIN_VALUE) {
-        break;
+      int alpha = std::max(-MATE_VALUE, g_xqwl_sc->nLastScore - delta);
+      int beta = std::min(MATE_VALUE, g_xqwl_sc->nLastScore + delta);
+      int failLow = 0;
+      int failHigh = 0;
+      while (true) {
+        vl = SearchRoot(i, alpha, beta);
+        if (vl > alpha && vl < beta) {
+          break;
+        }
+        if (vl <= alpha) {
+          beta = (alpha + beta) / 2;
+          alpha = std::max(-MATE_VALUE, vl - delta);
+          delta += delta / 4;
+          if (delta > ASPIRATION_DELTA_MAX) {
+            delta = ASPIRATION_DELTA_MAX;
+          }
+          if (++failLow >= ASPIRATION_MAX_FAILS) {
+            alpha = -MATE_VALUE;
+          }
+        } else {
+          alpha = (alpha + beta) / 2;
+          beta = std::min(MATE_VALUE, vl + delta);
+          delta += delta / 4;
+          if (delta > ASPIRATION_DELTA_MAX) {
+            delta = ASPIRATION_DELTA_MAX;
+          }
+          if (++failHigh >= ASPIRATION_MAX_FAILS) {
+            beta = MATE_VALUE;
+          }
+        }
+        if (alpha <= -WIN_VALUE && beta >= WIN_VALUE) {
+          vl = SearchRoot(i, alpha, beta);
+          break;
+        }
       }
     }
     g_xqwl_sc->nLastDepth = i;
