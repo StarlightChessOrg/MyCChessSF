@@ -22,6 +22,7 @@
 namespace {
 
 constexpr int kIoBufferBytes = 256 * 1024;
+constexpr long long kChunkEveryPositions = 2000;
 constexpr long long kProgressEveryPositions = 10000;
 constexpr long long kDefaultMaxPositions = 10'000'000LL;
 constexpr int kDefaultMaxDepth = 6;
@@ -264,21 +265,81 @@ int pick_random_move(PositionStruct &pos) {
   return legal[std::rand() % nLegal];
 }
 
+std::string worker_dir(const GenConfig &cfg, int worker_id) {
+  return cfg.output_dir + "/worker_" + std::to_string(worker_id);
+}
+
+std::string chunk_path(const GenConfig &cfg, int worker_id, long long chunk_idx) {
+  return worker_dir(cfg, worker_id) + "/chunk_" + std::to_string(chunk_idx) + ".txt";
+}
+
+struct ChunkWriter {
+  int worker_id;
+  const GenConfig &cfg;
+  std::vector<char> io_buf;
+  FILE *fp = nullptr;
+  long long chunk_idx = 0;
+  long long chunk_written = 0;
+  long long chunks_opened = 0;
+  std::string current_path;
+
+  ChunkWriter(int wid, const GenConfig &c) : worker_id(wid), cfg(c), io_buf(kIoBufferBytes) {}
+
+  ~ChunkWriter() { close(); }
+
+  void close() {
+    if (fp != nullptr) {
+      std::fclose(fp);
+      fp = nullptr;
+    }
+  }
+
+  bool open_next() {
+    close();
+    current_path = chunk_path(cfg, worker_id, chunk_idx);
+    fp = std::fopen(current_path.c_str(), "wb");
+    if (fp == nullptr) {
+      std::perror(current_path.c_str());
+      return false;
+    }
+    // Line buffering: flush on each "FEN\\tscore\\n" so partial chunks survive crashes.
+    setvbuf(fp, io_buf.data(), _IOLBF, io_buf.size());
+    chunk_written = 0;
+    ++chunks_opened;
+    std::fprintf(stderr, "[worker %d] chunk %lld -> %s\n", worker_id,
+                 static_cast<long long>(chunk_idx), current_path.c_str());
+    std::fflush(stderr);
+    return true;
+  }
+
+  bool write_line(const char *fen, int score) {
+    if (fp == nullptr)
+      return false;
+    std::fprintf(fp, "%s\t%d\n", fen, score);
+    ++chunk_written;
+    if (chunk_written >= kChunkEveryPositions) {
+      ++chunk_idx;
+      return open_next();
+    }
+    return true;
+  }
+};
+
 void worker_main(int worker_id, long long quota, const GenConfig &cfg) {
   InitZobrist();
   std::srand(static_cast<unsigned>(std::time(nullptr)) ^ static_cast<unsigned>(worker_id * 7919 + 1));
 
-  const std::string out_path = cfg.output_dir + "/worker_" + std::to_string(worker_id) + ".txt";
-  FILE *fp = std::fopen(out_path.c_str(), "wb");
-  if (fp == nullptr) {
-    std::perror(out_path.c_str());
+  const std::string out_dir = worker_dir(cfg, worker_id);
+  if (!ensure_dir(out_dir)) {
     std::exit(1);
   }
-  std::vector<char> io_buf(kIoBufferBytes);
-  // Full buffering: _IOLBF would flush on every "FEN\\tscore\\n" and slow down as files grow.
-  setvbuf(fp, io_buf.data(), _IOFBF, io_buf.size());
-  std::fprintf(stderr, "[worker %d] started -> %s (quota %lld)\n", worker_id, out_path.c_str(),
-               static_cast<long long>(quota));
+
+  ChunkWriter out(worker_id, cfg);
+  if (!out.open_next()) {
+    std::exit(1);
+  }
+  std::fprintf(stderr, "[worker %d] started (quota %lld, chunk size %lld)\n", worker_id,
+               static_cast<long long>(quota), static_cast<long long>(kChunkEveryPositions));
   std::fflush(stderr);
 
   // Hash table is ~16 MiB; keep off the stack (default thread stack is often 8 MiB).
@@ -313,12 +374,14 @@ void worker_main(int worker_id, long long quota, const GenConfig &cfg) {
       const XqwlSearchOutcome search =
           XqwlSearchBestMoveEx(search_pos, *tab, cfg.think_ms, /*use_book=*/false, cfg.max_depth);
 
-      std::fprintf(fp, "%s\t%d\n", fen.c_str(), search.score);
+      if (!out.write_line(fen.c_str(), search.score)) {
+        std::exit(1);
+      }
       ++written;
       if (written % kProgressEveryPositions == 0) {
-        std::fflush(fp);
-        std::fprintf(stderr, "[worker %d] progress %lld / %lld\n", worker_id,
-                     static_cast<long long>(written), static_cast<long long>(quota));
+        std::fprintf(stderr, "[worker %d] progress %lld / %lld (chunk %lld)\n", worker_id,
+                     static_cast<long long>(written), static_cast<long long>(quota),
+                     static_cast<long long>(out.chunk_idx));
         std::fflush(stderr);
       }
       if (written >= quota)
@@ -340,9 +403,11 @@ void worker_main(int worker_id, long long quota, const GenConfig &cfg) {
     }
   }
 
-  std::fclose(fp);
-  std::fprintf(stderr, "[worker %d] wrote %lld positions (%lld skipped) -> %s\n", worker_id,
-               static_cast<long long>(written), static_cast<long long>(skipped), out_path.c_str());
+  out.close();
+  std::fprintf(stderr,
+               "[worker %d] wrote %lld positions (%lld skipped) in %lld chunk file(s) -> %s\n",
+               worker_id, static_cast<long long>(written), static_cast<long long>(skipped),
+               static_cast<long long>(out.chunks_opened), out_dir.c_str());
 }
 
 } // namespace

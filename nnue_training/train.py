@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from data.dataset import (
+    DEFAULT_DATA_PATTERN,
     NnueDataset,
     compute_zscore_stats,
     make_dataloader,
@@ -189,7 +190,7 @@ def main() -> None:
     print(f"[data] source={data_source}")
     train_samples, val_samples, skipped = split_samples(
         data_source,
-        data_cfg.get("pattern", "worker_*.txt"),
+        data_cfg.get("pattern", DEFAULT_DATA_PATTERN),
         data_cfg.get("val_workers", [30, 31]),
     )
     print(f"[data] train={len(train_samples)}  val={len(val_samples)}  skipped={skipped}")

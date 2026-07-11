@@ -1,6 +1,6 @@
 data:
   source: ../nnue_data
-  pattern: "worker_*.txt"
+  pattern: "worker_*/chunk_*.txt"
   val_workers: [30, 31]
 
 model:

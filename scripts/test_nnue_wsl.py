@@ -52,7 +52,7 @@ def load_samples(path: Path, n: int) -> list[tuple[str, float]]:
 def main() -> None:
     bin_path = QINT8 / "output" / "quantized.xqnnue.bin"
     pt_path = QINT8 / "output" / "quantized.xqint8.pt"
-    data_path = ROOT / "nnue_data" / "worker_0.txt"
+    data_path = ROOT / "nnue_data" / "worker_0" / "chunk_0.txt"
 
     if not pt_path.is_file():
         print(f"Missing quantized checkpoint: {pt_path}")

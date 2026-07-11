@@ -10,7 +10,7 @@ pip install -r nnue_training/requirements.txt
 
 ## 数据
 
-- 默认读取 `../nnue_data/worker_*.txt`（FEN `\t` vl）
+- 默认读取 `../nnue_data/worker_*/chunk_*.txt`（FEN `\t` vl）
 - 配置见 `configs/smoke.yaml`（可改为完整训练配置）
 - 标签 z-score：`target_norm = (vl - mean) / std`，mean/std 写入 checkpoint
 

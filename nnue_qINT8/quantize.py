@@ -16,7 +16,7 @@ for p in (ROOT, TRAINING_ROOT, REPO_ROOT):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-from data.dataset import NnueDataset, load_samples, make_dataloader
+from data.dataset import DEFAULT_DATA_PATTERN, NnueDataset, load_samples, make_dataloader
 from evaluate import evaluate_models
 from int8_nnue import QuantizedNNUE, calibrate_fc_input_scales, quantize_float_nnue
 from model.nnue import NNUE
@@ -105,7 +105,7 @@ def main() -> None:
         "--data-pattern",
         type=str,
         default=None,
-        help='Glob pattern under data-dir, e.g. "worker_*.txt"',
+        help='Glob pattern under data-dir, e.g. "worker_*/chunk_*.txt"',
     )
     parser.add_argument(
         "--max-samples",
@@ -133,7 +133,7 @@ def main() -> None:
         ROOT,
         str(args.data_dir or data_cfg.get("source", "../nnue_data")),
     )
-    data_pattern = args.data_pattern or data_cfg.get("pattern", "worker_*.txt")
+    data_pattern = args.data_pattern or data_cfg.get("pattern", DEFAULT_DATA_PATTERN)
     max_samples = (
         args.max_samples
         if args.max_samples is not None

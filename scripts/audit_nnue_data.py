@@ -56,9 +56,9 @@ def main() -> None:
     data_dir = ROOT / "nnue_data"
     if len(sys.argv) > 1:
         data_dir = Path(sys.argv[1])
-    files = sorted(glob.glob(str(data_dir / "worker_*.txt")))
+    files = sorted(glob.glob(str(data_dir / "worker_*/chunk_*.txt")))
     if not files:
-        print(f"No worker_*.txt under {data_dir}")
+        print(f"No worker_*/chunk_*.txt under {data_dir}")
         sys.exit(1)
 
     stats: Counter[str] = Counter()

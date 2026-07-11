@@ -18,7 +18,8 @@ if str(_REPO_ROOT) not in sys.path:
 from features.xqwl_psq import fen_to_feature_indices
 from mycchess_sf.fen_parse import parse_fen_board
 
-_WORKER_RE = re.compile(r"worker_(\d+)\.txt$")
+DEFAULT_DATA_PATTERN = "worker_*/chunk_*.txt"
+_WORKER_DIR_RE = re.compile(r"^worker_(\d+)$")
 
 
 @dataclass(frozen=True)
@@ -53,11 +54,11 @@ def _parse_line(line: str) -> Sample | None:
 
 
 def _worker_id(path: Path) -> int | None:
-    m = _WORKER_RE.search(path.name)
+    m = _WORKER_DIR_RE.match(path.parent.name)
     return int(m.group(1)) if m else None
 
 
-def load_samples(source: str | Path, pattern: str = "worker_*.txt") -> tuple[list[Sample], int]:
+def load_samples(source: str | Path, pattern: str = DEFAULT_DATA_PATTERN) -> tuple[list[Sample], int]:
     root = Path(source)
     files = sorted(glob.glob(str(root / pattern)))
     samples: list[Sample] = []
