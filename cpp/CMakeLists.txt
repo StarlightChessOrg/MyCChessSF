@@ -29,12 +29,23 @@ foreach(_root IN LISTS _pybind11_search_paths)
 endforeach()
 
 if(NOT _pybind11_from_subdir)
+  # Prefer pybind11 from the same interpreter that builds the module
   execute_process(
-    COMMAND "${Python_EXECUTABLE}" -c "import pybind11; print(pybind11.get_cmake_dir())"
+    COMMAND "${Python_EXECUTABLE}" -m pybind11 --cmakedir
     OUTPUT_VARIABLE _p11_cmake_dir
     OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_VARIABLE _p11_err
-    RESULT_VARIABLE _p11_rc)
+    ERROR_QUIET
+    RESULT_VARIABLE _p11_cli_rc)
+  if(NOT _p11_cli_rc EQUAL "0" OR NOT EXISTS "${_p11_cmake_dir}/pybind11Config.cmake")
+    execute_process(
+      COMMAND "${Python_EXECUTABLE}" -c "import pybind11; print(pybind11.get_cmake_dir())"
+      OUTPUT_VARIABLE _p11_cmake_dir
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_VARIABLE _p11_err
+      RESULT_VARIABLE _p11_rc)
+  else()
+    set(_p11_rc 0)
+  endif()
   if(_p11_rc EQUAL "0" AND EXISTS "${_p11_cmake_dir}/pybind11Config.cmake")
     message(STATUS "xqwlight_core: pip pybind11 (${_p11_cmake_dir})")
     set(pybind11_DIR "${_p11_cmake_dir}")
@@ -47,8 +58,9 @@ if(NOT _pybind11_from_subdir)
   else()
     message(
       FATAL_ERROR
-      "xqwlight_core: pybind11 not found.\n"
-      "  pip install pybind11\n"
+      "xqwlight_core: pybind11 not found for ${Python_EXECUTABLE}.\n"
+      "  ${Python_EXECUTABLE} -m pip install pybind11\n"
+      "  or bash scripts/build_linux.sh (installs pybind11 automatically)\n"
       "  or vendor cpp/pybind11-master\n"
       "  or cmake -DMYCCHESSSF_FETCH_PYBIND11=ON\n"
       "  (${_p11_err})")

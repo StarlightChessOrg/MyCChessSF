@@ -1,4 +1,5 @@
 numpy>=1.24
 sanic>=23.12
+pybind11>=2.13
 
-# C++ 扩展 xqwlight_core 需本地 CMake 编译，见 README
+# xqwlight_core .so must be built with scripts/build_linux.sh (needs cmake, g++, python dev headers)

@@ -15,8 +15,10 @@
 
 ```bash
 sudo apt install build-essential cmake python3-dev   # Debian/Ubuntu 示例
-pip install pybind11 numpy sanic
+pip install -r requirements.txt   # includes pybind11
 ```
+
+`scripts/build_linux.sh` will **`pip install pybind11`** for the same `python3` used by CMake if it is missing.
 
 ## 编译与安装
 
