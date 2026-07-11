@@ -22,7 +22,7 @@
 namespace {
 
 constexpr int kIoBufferBytes = 256 * 1024;
-constexpr long long kChunkEveryPositions = 2000;
+constexpr long long kDefaultChunkSize = 2000;
 constexpr long long kProgressEveryPositions = 10000;
 constexpr long long kDefaultMaxPositions = 10'000'000LL;
 constexpr int kDefaultMaxDepth = 6;
@@ -34,6 +34,7 @@ struct GenConfig {
   int max_depth = kDefaultMaxDepth;
   int jobs = 0;
   int random_pct = 20;
+  long long chunk_size = kDefaultChunkSize;
   std::string nnue_path;
   bool pst_only = false;
   bool nnue_path_set = false;
@@ -48,6 +49,7 @@ void usage(const char *prog) {
                "  --max-depth N          Max iterative deepening depth (default: 6)\n"
                "  --jobs N               Parallel workers (0 = CPU cores, default: 0)\n"
                "  --random-pct PCT       Random move probability 0-100 (default: 20)\n"
+               "  --chunk-size N         Positions per chunk file (default: 2000)\n"
                "  --nnue PATH            NNUE weights (.xqnnue.bin); auto-detect if omitted\n"
                "  --pst-only             Force PST eval even when NNUE weights exist\n",
                prog);
@@ -139,6 +141,12 @@ bool parse_args(int argc, char **argv, GenConfig &cfg) {
       const char *v = need(arg);
       if (v == nullptr || !parse_i32(v, cfg.random_pct) || cfg.random_pct < 0 || cfg.random_pct > 100) {
         std::fprintf(stderr, "Invalid --random-pct (0-100)\n");
+        return false;
+      }
+    } else if (std::strcmp(arg, "--chunk-size") == 0) {
+      const char *v = need(arg);
+      if (v == nullptr || !parse_i64(v, cfg.chunk_size) || cfg.chunk_size <= 0) {
+        std::fprintf(stderr, "Invalid --chunk-size\n");
         return false;
       }
     } else if (std::strcmp(arg, "--nnue") == 0) {
@@ -317,7 +325,7 @@ struct ChunkWriter {
       return false;
     std::fprintf(fp, "%s\t%d\n", fen, score);
     ++chunk_written;
-    if (chunk_written >= kChunkEveryPositions) {
+    if (chunk_written >= cfg.chunk_size) {
       ++chunk_idx;
       return open_next();
     }
@@ -339,7 +347,7 @@ void worker_main(int worker_id, long long quota, const GenConfig &cfg) {
     std::exit(1);
   }
   std::fprintf(stderr, "[worker %d] started (quota %lld, chunk size %lld)\n", worker_id,
-               static_cast<long long>(quota), static_cast<long long>(kChunkEveryPositions));
+               static_cast<long long>(quota), static_cast<long long>(cfg.chunk_size));
   std::fflush(stderr);
 
   // Hash table is ~16 MiB; keep off the stack (default thread stack is often 8 MiB).
@@ -433,8 +441,10 @@ int main(int argc, char **argv) {
   const long long base = cfg.max_positions / jobs;
   const long long rem = cfg.max_positions % jobs;
   std::fprintf(stderr,
-               "[xqwl_gen_nnue] output=%s positions=%lld jobs=%d think_ms=%d max_depth=%d random_pct=%d%%\n",
-               cfg.output_dir.c_str(), cfg.max_positions, jobs, cfg.think_ms, cfg.max_depth, cfg.random_pct);
+               "[xqwl_gen_nnue] output=%s positions=%lld jobs=%d think_ms=%d max_depth=%d "
+               "random_pct=%d%% chunk_size=%lld\n",
+               cfg.output_dir.c_str(), cfg.max_positions, jobs, cfg.think_ms, cfg.max_depth, cfg.random_pct,
+               static_cast<long long>(cfg.chunk_size));
   if (cfg.nnue_path.empty()) {
     std::fprintf(stderr, "[xqwl_gen_nnue] eval=PST (no NNUE weights found; use --nnue PATH or --pst-only)\n");
   } else {
