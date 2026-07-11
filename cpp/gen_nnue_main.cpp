@@ -21,7 +21,6 @@
 namespace {
 
 constexpr int kIoBufferBytes = 8192;
-constexpr long long kFlushEveryPositions = 500;
 constexpr long long kProgressEveryPositions = 10000;
 constexpr long long kDefaultMaxPositions = 10'000'000LL;
 
@@ -125,6 +124,53 @@ bool ensure_dir(const std::string &path) {
   return false;
 }
 
+int count_char(const std::string &s, char ch) {
+  int n = 0;
+  for (char c : s) {
+    if (c == ch)
+      ++n;
+  }
+  return n;
+}
+
+bool board_has_one_king_each(const PositionStruct &pos) {
+  int red_kings = 0;
+  int black_kings = 0;
+  for (int sq = 0; sq < 256; ++sq) {
+    if (!IN_BOARD(sq))
+      continue;
+    const BYTE pc = pos.ucpcSquares[sq];
+    if (pc == 8)
+      ++red_kings;
+    else if (pc == 16)
+      ++black_kings;
+  }
+  return red_kings == 1 && black_kings == 1;
+}
+
+bool fen_format_ok(const std::string &fen) {
+  if (fen.empty() || fen.find('\t') != std::string::npos)
+    return false;
+  const auto sp = fen.find(' ');
+  if (sp == std::string::npos)
+    return false;
+  const std::string board = fen.substr(0, sp);
+  if (count_char(board, '/') != 9)
+    return false;
+  const std::string tail = fen.substr(sp);
+  if (tail != " w - - 0 1" && tail != " b - - 0 1")
+    return false;
+  int red_kings = 0;
+  int black_kings = 0;
+  for (char c : board) {
+    if (c == 'K')
+      ++red_kings;
+    else if (c == 'k')
+      ++black_kings;
+  }
+  return red_kings == 1 && black_kings == 1;
+}
+
 int terminal_kind(PositionStruct &pos) {
   if (pos.IsMate() != 0)
     return 1;
@@ -178,20 +224,27 @@ void worker_main(int worker_id, long long quota, const GenConfig &cfg) {
   *tab = XqwlSearchTables{};
   PositionStruct pos;
   long long written = 0;
+  long long skipped = 0;
 
   while (written < quota) {
     pos.Startup();
     for (;;) {
+      if (!board_has_one_king_each(pos)) {
+        ++skipped;
+        break;
+      }
       const std::string fen = xqwl_position_to_fen(pos);
+      if (!fen_format_ok(fen)) {
+        ++skipped;
+        break;
+      }
       PositionStruct search_pos = pos;
       const XqwlSearchOutcome search =
           XqwlSearchBestMoveEx(search_pos, *tab, cfg.think_ms, /*use_book=*/false);
 
       std::fprintf(fp, "%s\t%d\n", fen.c_str(), search.score);
+      std::fflush(fp);
       ++written;
-      if (written % kFlushEveryPositions == 0) {
-        std::fflush(fp);
-      }
       if (written % kProgressEveryPositions == 0) {
         std::fprintf(stderr, "[worker %d] progress %lld / %lld\n", worker_id,
                      static_cast<long long>(written), static_cast<long long>(quota));
@@ -216,8 +269,8 @@ void worker_main(int worker_id, long long quota, const GenConfig &cfg) {
   }
 
   std::fclose(fp);
-  std::fprintf(stderr, "[worker %d] wrote %lld positions -> %s\n", worker_id,
-               static_cast<long long>(written), out_path.c_str());
+  std::fprintf(stderr, "[worker %d] wrote %lld positions (%lld skipped) -> %s\n", worker_id,
+               static_cast<long long>(written), static_cast<long long>(skipped), out_path.c_str());
 }
 
 } // namespace

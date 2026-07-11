@@ -25,17 +25,22 @@ cmake .. -DPython_EXECUTABLE="$PYTHON" -DCMAKE_CXX_FLAGS="$CXXOPT"
 cmake --build . -j"$(nproc 2>/dev/null || echo 2)"
 SO="$(find . -maxdepth 1 -name 'xqwlight_core*.so' | head -1)"
 GEN="$(find . -maxdepth 1 -name 'xqwl_gen_nnue' -type f | head -1)"
+SO_NAME="$(basename "$SO")"
+GEN_NAME=""
+if [[ -n "$GEN" ]]; then
+  GEN_NAME="$(basename "$GEN")"
+fi
 if [[ -z "$SO" ]]; then
   echo "[build] xqwlight_core*.so not found" >&2
   exit 1
 fi
 
 cd "$ROOT"
-cp -f "cpp/build/$(basename "$SO")" "$ROOT/"
-echo "[build] Copied $(basename "$SO") -> $ROOT/"
-if [[ -n "$GEN" ]]; then
-  cp -f "$GEN" "$ROOT/"
-  echo "[build] Copied $(basename "$GEN") -> $ROOT/"
+cp -f "cpp/build/$SO_NAME" "$ROOT/"
+echo "[build] Copied $SO_NAME -> $ROOT/"
+if [[ -n "$GEN_NAME" ]]; then
+  cp -f "cpp/build/$GEN_NAME" "$ROOT/"
+  echo "[build] Copied $GEN_NAME -> $ROOT/"
 fi
 
 if [[ ! -f mycchess_sf/static/xqwl/board.png ]]; then
@@ -46,10 +51,10 @@ fi
 echo "[build] Packing deployment/ ..."
 rm -rf "$DEPLOY"
 mkdir -p "$DEPLOY_BIN" "$DEPLOY_DB"
-cp -f "$ROOT/$(basename "$SO")" "$DEPLOY_BIN/"
-if [[ -n "$GEN" ]]; then
-  cp -f "$ROOT/$(basename "$GEN")" "$DEPLOY_BIN/"
-  chmod +x "$DEPLOY_BIN/$(basename "$GEN")"
+cp -f "$ROOT/$SO_NAME" "$DEPLOY_BIN/"
+if [[ -n "$GEN_NAME" ]]; then
+  cp -f "$ROOT/$GEN_NAME" "$DEPLOY_BIN/"
+  chmod +x "$DEPLOY_BIN/$GEN_NAME"
 fi
 if [[ ! -f data/compressed_files/book.7z ]]; then
   echo "[build] data/compressed_files/book.7z not found" >&2
@@ -64,6 +69,6 @@ echo "[build] Deployment: $DEPLOY"
 echo "[build]   bin/  -> xqwlight_core + xqwl_gen_nnue"
 echo "[build]   db/   -> BOOK.DAT"
 echo "[build] Run web: mycchess-play-web --book $DEPLOY_DB/BOOK.DAT"
-if [[ -n "$GEN" ]]; then
+if [[ -n "$GEN_NAME" ]]; then
   echo "[build] NNUE data gen: $DEPLOY_BIN/xqwl_gen_nnue --output-dir nnue_data"
 fi
