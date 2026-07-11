@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <vector>
 
 struct HashItem {
   BYTE ucDepth, ucFlag;
@@ -23,8 +24,8 @@ struct XqwlSearchTables {
   int nHistoryTable[65536];
   int mvKillers[LIMIT_DEPTH][2];
   HashItem HashTable[HASH_SIZE];
-  int nBookSize;
-  BookItem BookTable[BOOK_SIZE];
+  int nBookSize = 0;
+  std::vector<BookItem> book_table;
   xqwl_nnue::Runtime *nnue = nullptr;
 };
 
@@ -101,14 +102,21 @@ static void XqwlLoadBookFromFile(const char *path, XqwlSearchTables &srch) {
     return;
   }
   std::rewind(f);
-  int n = static_cast<int>(sz / static_cast<long>(sizeof(BookItem)));
-  if (n > BOOK_SIZE) {
-    n = BOOK_SIZE;
+  const int n_items = static_cast<int>(sz / static_cast<long>(sizeof(BookItem)));
+  if (n_items <= 0) {
+    std::fclose(f);
+    return;
   }
-  if (static_cast<int>(std::fread(srch.BookTable, sizeof(BookItem), static_cast<size_t>(n), f)) != n) {
+  if (n_items > BOOK_MAX_ENTRIES) {
+    std::fclose(f);
+    return;
+  }
+  srch.book_table.resize(static_cast<size_t>(n_items));
+  if (static_cast<int>(std::fread(srch.book_table.data(), sizeof(BookItem), static_cast<size_t>(n_items), f)) != n_items) {
+    srch.book_table.clear();
     srch.nBookSize = 0;
   } else {
-    srch.nBookSize = n;
+    srch.nBookSize = n_items;
   }
   std::fclose(f);
 }
@@ -131,24 +139,25 @@ static int SearchBook(void) {
   }
   bMirror = FALSE;
   bkToSearch.dwLock = XQWL_SEARCH_POS.zobr.dwLock1;
+  BookItem *const book_base = XQWL_SEARCH_TAB.book_table.data();
   lpbk = static_cast<BookItem *>(
-      bsearch(&bkToSearch, XQWL_SEARCH_TAB.BookTable, static_cast<size_t>(XQWL_SEARCH_TAB.nBookSize), sizeof(BookItem), CompareBook));
+      bsearch(&bkToSearch, book_base, static_cast<size_t>(XQWL_SEARCH_TAB.nBookSize), sizeof(BookItem), CompareBook));
   if (lpbk == nullptr) {
     bMirror = TRUE;
     XQWL_SEARCH_POS.Mirror(posMirror);
     bkToSearch.dwLock = posMirror.zobr.dwLock1;
     lpbk = static_cast<BookItem *>(bsearch(
-        &bkToSearch, XQWL_SEARCH_TAB.BookTable, static_cast<size_t>(XQWL_SEARCH_TAB.nBookSize), sizeof(BookItem), CompareBook));
+        &bkToSearch, book_base, static_cast<size_t>(XQWL_SEARCH_TAB.nBookSize), sizeof(BookItem), CompareBook));
   }
   if (lpbk == nullptr) {
     return 0;
   }
-  while (lpbk >= XQWL_SEARCH_TAB.BookTable && lpbk->dwLock == bkToSearch.dwLock) {
+  while (lpbk >= book_base && lpbk->dwLock == bkToSearch.dwLock) {
     lpbk--;
   }
   lpbk++;
   vl = nBookMoves = 0;
-  while (lpbk < XQWL_SEARCH_TAB.BookTable + XQWL_SEARCH_TAB.nBookSize && lpbk->dwLock == bkToSearch.dwLock) {
+  while (lpbk < book_base + XQWL_SEARCH_TAB.nBookSize && lpbk->dwLock == bkToSearch.dwLock) {
     mv = (bMirror ? MIRROR_MOVE(lpbk->wmv) : lpbk->wmv);
     if (XQWL_SEARCH_POS.LegalMove(mv)) {
       mvs[nBookMoves] = mv;

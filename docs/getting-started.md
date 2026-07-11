@@ -35,6 +35,14 @@ bash scripts/build_linux.sh
 | `xqwlight_core*.so` | Python 扩展：规则核 + 搜索 + NNUE |
 | `xqwl_gen_nnue` | NNUE 训练数据生成器（独立可执行，无需 Python） |
 
+同时生成 **`deployment/` 部署包**（可直接拷贝到服务器）：
+
+| 路径 | 说明 |
+|------|------|
+| `deployment/bin/` | `xqwlight_core*.so`、`xqwl_gen_nnue` |
+| `deployment/db/BOOK.DAT` | 开局库（自 `data/compressed_files/book.7z` 解压） |
+| `deployment/README.md` | 部署说明 |
+
 `build_linux.sh` 默认以 **`-O3`** 编译；可覆盖：
 
 ```bash

@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# Build xqwlight_core.so on Linux and install the Python package (run from repo root)
+# Build xqwlight_core.so on Linux, install Python package, and pack deployment/
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PYTHON="${PYTHON:-$(command -v python3)}"
-# C++ optimization flag for xqwlight_core (override: CXXOPT=-O2 bash scripts/build_linux.sh)
 CXXOPT="${CXXOPT:--O3}"
+DEPLOY="$ROOT/deployment"
+DEPLOY_BIN="$DEPLOY/bin"
+DEPLOY_DB="$DEPLOY/db"
 
 echo "[build] Python: $PYTHON"
 echo "[build] CXXOPT: $CXXOPT"
 "$PYTHON" -m pip install -q -U pip
-"$PYTHON" -m pip install -q pybind11 numpy pillow
-# pybind11 CMake config must match the same interpreter used for the extension
+"$PYTHON" -m pip install -q pybind11 numpy pillow py7zr
 if ! "$PYTHON" -c "import pybind11; print('pybind11', pybind11.__version__, pybind11.get_cmake_dir())"; then
   echo "[build] Failed to import pybind11 after pip install" >&2
   exit 1
@@ -28,19 +29,41 @@ if [[ -z "$SO" ]]; then
   echo "[build] xqwlight_core*.so not found" >&2
   exit 1
 fi
-cp -f "$SO" "$ROOT/"
+
+cd "$ROOT"
+cp -f "cpp/build/$(basename "$SO")" "$ROOT/"
 echo "[build] Copied $(basename "$SO") -> $ROOT/"
 if [[ -n "$GEN" ]]; then
   cp -f "$GEN" "$ROOT/"
   echo "[build] Copied $(basename "$GEN") -> $ROOT/"
 fi
-cd "$ROOT"
+
 if [[ ! -f mycchess_sf/static/xqwl/board.png ]]; then
   echo "[build] Fetching XQWL UI assets..."
   "$PYTHON" scripts/fetch_xqwl_assets.py
 fi
-"$PYTHON" -m pip install -q -e .
-echo "[build] Done. Run: mycchess-play-web --host 0.0.0.0 --port 5151"
+
+echo "[build] Packing deployment/ ..."
+rm -rf "$DEPLOY"
+mkdir -p "$DEPLOY_BIN" "$DEPLOY_DB"
+cp -f "$ROOT/$(basename "$SO")" "$DEPLOY_BIN/"
 if [[ -n "$GEN" ]]; then
-  echo "[build] NNUE data gen: ./xqwl_gen_nnue --output-dir nnue_data"
+  cp -f "$ROOT/$(basename "$GEN")" "$DEPLOY_BIN/"
+  chmod +x "$DEPLOY_BIN/$(basename "$GEN")"
+fi
+if [[ ! -f data/compressed_files/book.7z ]]; then
+  echo "[build] data/compressed_files/book.7z not found" >&2
+  exit 1
+fi
+"$PYTHON" scripts/extract_book.py --archive data/compressed_files/book.7z --output-dir "$DEPLOY_DB"
+cp -f scripts/deployment_README.md "$DEPLOY/README.md"
+
+"$PYTHON" -m pip install -q -e .
+echo "[build] Done."
+echo "[build] Deployment: $DEPLOY"
+echo "[build]   bin/  -> xqwlight_core + xqwl_gen_nnue"
+echo "[build]   db/   -> BOOK.DAT"
+echo "[build] Run web: mycchess-play-web --book $DEPLOY_DB/BOOK.DAT"
+if [[ -n "$GEN" ]]; then
+  echo "[build] NNUE data gen: $DEPLOY_BIN/xqwl_gen_nnue --output-dir nnue_data"
 fi

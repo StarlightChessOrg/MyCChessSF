@@ -612,8 +612,11 @@ def _html_page() -> str:
 
 
 def _default_book_path() -> Path | None:
+    root = Path(__file__).resolve().parent.parent
     candidates = [
-        Path(__file__).resolve().parent.parent / "data" / "BOOK.DAT",
+        root / "deployment" / "db" / "BOOK.DAT",
+        Path.cwd() / "deployment" / "db" / "BOOK.DAT",
+        root / "data" / "BOOK.DAT",
         Path.cwd() / "data" / "BOOK.DAT",
     ]
     for p in candidates:
@@ -640,7 +643,7 @@ def main() -> None:
     p.add_argument("--host", type=str, default="127.0.0.1")
     p.add_argument("--port", type=int, default=5151)
     p.add_argument("--think-ms", type=int, default=1000, help="小巫师每步思考时间（毫秒）")
-    p.add_argument("--book", type=Path, default=None, help="开局库 BOOK.DAT（默认 data/BOOK.DAT）")
+    p.add_argument("--book", type=Path, default=None, help="开局库 BOOK.DAT（默认 deployment/db/BOOK.DAT）")
     p.add_argument("--no-book-default", action="store_true", help="启动时默认关闭开局库")
     args = p.parse_args()
 

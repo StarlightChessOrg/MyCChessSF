@@ -17,12 +17,15 @@ MyCChessSF/
 │   ├── static/xqwl/              Win32 界面资源（PNG + WAV）
 │   └── ...
 ├── data/
-│   └── BOOK.DAT                  开局库
+│   ├── README.md
+│   └── compressed_files/         开局库与 openbook 压缩包（构建时解压 book.7z）
+├── deployment/                   build_linux.sh 产出（bin/ + db/，不入库）
 ├── nnue_data/                    xqwl_gen_nnue 输出（FEN\tvl，通常不入库）
 ├── nnue_training/                浮点 NNUE PyTorch 训练
 ├── nnue_qINT8/                   INT8 量化 + .xqnnue.bin 导出
 ├── scripts/
-│   ├── build_linux.sh            一键编译
+│   ├── build_linux.sh            一键编译 + 打包 deployment/
+│   ├── extract_book.py           从 book.7z 解压 BOOK.DAT 到 deployment/db/
 │   ├── test_nnue_wsl.py          C++ vs Python NNUE 对比测试
 │   └── fetch_xqwl_assets.py      拉取网页 UI 资源
 └── docs/                         文档（本目录）

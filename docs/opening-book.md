@@ -1,6 +1,23 @@
 # 开局库
 
-仓库已随附象棋小巫师 Win32 开局库 **`data/BOOK.DAT`**（约 96 KB，12081 条项）。
+压缩包 **`data/compressed_files/book.7z`** 源自 Chess98 openbook（约 **178 万条**，14 MB 解压；旧版 xqbase 小库约 1.2 万条已替换）。
+
+制库工具与棋谱源见同目录下其他 7z（`make_book.7z`、大师棋谱等），清单见 **`data/README.md`**。
+
+## 部署包中的 BOOK.DAT
+
+`bash scripts/build_linux.sh` 会：
+
+1. 从 `data/compressed_files/book.7z` 解压 → **`deployment/db/BOOK.DAT`**
+2. 将 `xqwlight_core*.so`、`xqwl_gen_nnue` 放入 **`deployment/bin/`**
+3. 生成 **`deployment/README.md`** 简要说明
+
+也可单独解压（输出同样到 `deployment/db/`）：
+
+```bash
+pip install py7zr
+python scripts/extract_book.py
+```
 
 ## 网页侧栏
 
@@ -14,10 +31,10 @@
 mycchess-play-web --no-book-default
 ```
 
-指定其他开局库文件：
+指定开局库（默认查找 `deployment/db/BOOK.DAT`）：
 
 ```bash
-mycchess-play-web --book /path/to/BOOK.DAT
+mycchess-play-web --book deployment/db/BOOK.DAT
 ```
 
 ## 搜索 API

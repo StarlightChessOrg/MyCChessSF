@@ -47,4 +47,5 @@ const int HASH_SIZE = 1 << 20;
 const int HASH_ALPHA = 1;
 const int HASH_BETA = 2;
 const int HASH_PV = 3;
-const int BOOK_SIZE = 16384;
+const int BOOK_SIZE = 16384;       // legacy fixed-table size (unused; kept for reference)
+const int BOOK_MAX_ENTRIES = 5000000; // max opening-book lines loaded into RAM

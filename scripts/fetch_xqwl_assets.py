@@ -8,7 +8,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "mycchess_sf" / "static" / "xqwl"
-DATA = ROOT / "data"
 BASE = "https://raw.githubusercontent.com/xqbase/xqwlight/master/Win32"
 
 BMPS = [
@@ -73,14 +72,10 @@ def main() -> None:
     tmp = ROOT / "scripts" / "_xqwl_res_cache"
     tmp.mkdir(parents=True, exist_ok=True)
     STATIC.mkdir(parents=True, exist_ok=True)
-    DATA.mkdir(parents=True, exist_ok=True)
-
     for name in BMPS:
         _download(f"{BASE}/RES/{name}", tmp / name)
     for name in WAVS:
         _download(f"{BASE}/RES/{name}", tmp / name)
-    _download(f"{BASE}/BOOK.DAT", DATA / "BOOK.DAT")
-
     for name in BMPS:
         stem = name[:-4].lower()
         chroma = name != "BOARD.BMP"
@@ -90,7 +85,6 @@ def main() -> None:
         shutil.copy2(tmp / name, STATIC / name.lower())
 
     print(f"[fetch] assets -> {STATIC}")
-    print(f"[fetch] BOOK.DAT -> {DATA / 'BOOK.DAT'}")
 
 
 if __name__ == "__main__":
