@@ -52,4 +52,8 @@ const int ASPIRATION_DELTA = 25;
 const int LMR_MOVE_THRESHOLD = 3;
 const int LMR_MIN_DEPTH = 3;
 const int QUIESCENCE_TT_DEPTH = 0;
+const int NULL_ATTACKING_MIN = 3; // ElephantEye: unverified null move when attack pieces >= this
+const int IID_MIN_DEPTH = 4;
+const int SINGULAR_MIN_DEPTH = 6;
+const int SINGULAR_MARGIN = 12;
 const int BOOK_MAX_ENTRIES = 5000000; // max opening-book lines loaded into RAM

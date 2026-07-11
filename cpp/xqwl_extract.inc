@@ -595,6 +595,28 @@ struct PositionStruct {
   BOOL NullSafe(void) const {                   // Skip null-move verification when material is high
     return (sdPlayer == 0 ? vlWhite : vlBlack) > NULL_SAFE_MARGIN;
   }
+  /** Rook/knight/cannon/pawn count for side sd (ElephantEye null-move tiers). */
+  int AttackingPieceCount(int sd) const {
+    int count = 0;
+    for (int sq = 0; sq < 256; ++sq) {
+      if (!IN_BOARD(sq)) {
+        continue;
+      }
+      const BYTE pc = ucpcSquares[sq];
+      if (pc == 0) {
+        continue;
+      }
+      const BOOL friendly = (pc < 16) ? (sd == 0) : (sd == 1);
+      if (!friendly) {
+        continue;
+      }
+      const int kind = (pc < 16) ? static_cast<int>(pc) - 8 : static_cast<int>(pc) - 16;
+      if (kind >= PIECE_KNIGHT && kind <= PIECE_PAWN) {
+        ++count;
+      }
+    }
+    return count;
+  }
   void Mirror(PositionStruct &posMirror) const; // Build horizontally mirrored copy
 };
 

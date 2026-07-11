@@ -220,6 +220,8 @@ static int ProbeHash(int vlAlpha, int vlBeta, int nDepth, int &mv) {
     }
     hsh.svl += XQWL_SEARCH_POS.nDistance;
     bMate = TRUE;
+  } else if (hsh.svl == XQWL_SEARCH_POS.DrawValue()) {
+    return -MATE_VALUE;
   }
   if (hsh.ucDepth >= nDepth || bMate) {
     if (hsh.ucFlag == HASH_BETA) {
@@ -230,6 +232,23 @@ static int ProbeHash(int vlAlpha, int vlBeta, int nDepth, int &mv) {
     return hsh.svl;
   }
   return -MATE_VALUE;
+}
+
+static inline int MateValueScore(const PositionStruct &pos) { return pos.nDistance - MATE_VALUE; }
+
+static void SortCheckMoves(int *mvs, int *vls, int nGenMoves) {
+  for (int i = 1; i < nGenMoves; ++i) {
+    const int mvBest = mvs[i];
+    const int vlBest = vls[i];
+    int j = i - 1;
+    while (j >= 0 && vlBest > vls[j]) {
+      mvs[j + 1] = mvs[j];
+      vls[j + 1] = vls[j];
+      --j;
+    }
+    mvs[j + 1] = mvBest;
+    vls[j + 1] = vlBest;
+  }
 }
 
 static void RecordHash(int nFlag, int vl, int nDepth, int mv) {
@@ -250,6 +269,8 @@ static void RecordHash(int nFlag, int vl, int nDepth, int mv) {
       return;
     }
     hsh.svl = static_cast<short>(vl - XQWL_SEARCH_POS.nDistance);
+  } else if (vl == XQWL_SEARCH_POS.DrawValue() && mv == 0) {
+    return;
   } else {
     hsh.svl = static_cast<short>(vl);
   }
@@ -296,25 +317,35 @@ struct SortStruct {
   int mvHash, mvKiller1, mvKiller2;
   int nPhase, nIndex, nGenMoves;
   int mvs[MAX_GEN_MOVES];
+  int vls[MAX_GEN_MOVES];
   BOOL singleReply;
+  BOOL preSortedInCheck;
 
   void Init(int mvHash_) {
     mvHash = mvHash_;
     mvKiller1 = XQWL_SEARCH_TAB.mvKillers[XQWL_SEARCH_POS.nDistance][0];
     mvKiller2 = XQWL_SEARCH_TAB.mvKillers[XQWL_SEARCH_POS.nDistance][1];
-    nPhase = PHASE_HASH;
     singleReply = FALSE;
+    preSortedInCheck = FALSE;
     if (XQWL_SEARCH_POS.InCheck()) {
+      preSortedInCheck = TRUE;
+      nPhase = PHASE_REST;
+      nGenMoves = 0;
       int tmp[MAX_GEN_MOVES];
       const int n = XQWL_SEARCH_POS.GenerateMoves(tmp);
-      int cnt = 0;
-      for (int j = 0; j < n && cnt <= 1; j++) {
+      for (int j = 0; j < n; ++j) {
         if (XqwlSearchMakeMove(tmp[j])) {
           XqwlSearchUndoMakeMove();
-          cnt++;
+          mvs[nGenMoves] = tmp[j];
+          vls[nGenMoves] = (tmp[j] == mvHash) ? 0x7fffffff : XQWL_SEARCH_TAB.nHistoryTable[tmp[j]];
+          ++nGenMoves;
         }
       }
-      singleReply = (cnt == 1);
+      singleReply = (nGenMoves == 1);
+      SortCheckMoves(mvs, vls, nGenMoves);
+      nIndex = 0;
+    } else {
+      nPhase = PHASE_HASH;
     }
   }
   int Next(void);
@@ -322,6 +353,12 @@ struct SortStruct {
 
 int SortStruct::Next(void) {
   int mv;
+  if (preSortedInCheck) {
+    if (nIndex < nGenMoves) {
+      return mvs[nIndex++];
+    }
+    return 0;
+  }
   switch (nPhase) {
   case PHASE_HASH:
     nPhase = PHASE_KILLER_1;
@@ -377,10 +414,18 @@ static int SearchQuiesc(int vlAlpha, int vlBeta) {
   int i, nGenMoves, nHashFlag;
   int vl, vlBest, mvHash, mvBest;
   int mvs[MAX_GEN_MOVES];
+  int vls[MAX_GEN_MOVES];
 
+  vl = MateValueScore(XQWL_SEARCH_POS);
+  if (vl >= vlBeta) {
+    return vl;
+  }
   vl = XQWL_SEARCH_POS.RepStatus();
   if (vl != 0) {
     return XQWL_SEARCH_POS.RepValue(vl);
+  }
+  if (XQWL_SEARCH_POS.InCheck() && XQWL_SEARCH_POS.IsMate()) {
+    return MateValueScore(XQWL_SEARCH_POS);
   }
   if (XQWL_SEARCH_POS.nDistance == LIMIT_DEPTH) {
     return XqwlEvalForSearch(XQWL_SEARCH_POS);
@@ -395,7 +440,10 @@ static int SearchQuiesc(int vlAlpha, int vlBeta) {
 
   if (XQWL_SEARCH_POS.InCheck()) {
     nGenMoves = XQWL_SEARCH_POS.GenerateMoves(mvs);
-    qsort(mvs, static_cast<size_t>(nGenMoves), sizeof(int), CompareHistory);
+    for (i = 0; i < nGenMoves; ++i) {
+      vls[i] = (mvs[i] == mvHash) ? 0x7fffffff : XQWL_SEARCH_TAB.nHistoryTable[mvs[i]];
+    }
+    SortCheckMoves(mvs, vls, nGenMoves);
   } else {
     vl = XqwlEvalForSearch(XQWL_SEARCH_POS);
     if (vl > vlBest) {
@@ -450,9 +498,16 @@ static int SearchFull(int vlAlpha, int vlBeta, int nDepth, BOOL bNoNull = FALSE)
   if (nDepth <= 0) {
     return SearchQuiesc(vlAlpha, vlBeta);
   }
+  vl = MateValueScore(XQWL_SEARCH_POS);
+  if (vl >= vlBeta) {
+    return vl;
+  }
   vl = XQWL_SEARCH_POS.RepStatus();
   if (vl != 0) {
     return XQWL_SEARCH_POS.RepValue(vl);
+  }
+  if (XQWL_SEARCH_POS.InCheck() && XQWL_SEARCH_POS.IsMate()) {
+    return MateValueScore(XQWL_SEARCH_POS);
   }
   if (XQWL_SEARCH_POS.nDistance == LIMIT_DEPTH) {
     return XqwlEvalForSearch(XQWL_SEARCH_POS);
@@ -461,29 +516,64 @@ static int SearchFull(int vlAlpha, int vlBeta, int nDepth, BOOL bNoNull = FALSE)
   if (vl > -MATE_VALUE) {
     return vl;
   }
-  if (!bNoNull && !XQWL_SEARCH_POS.InCheck() && XQWL_SEARCH_POS.NullOkay()) {
-    XQWL_SEARCH_POS.NullMove();
-    vl = -SearchFull(-vlBeta, 1 - vlBeta, nDepth - NULL_DEPTH - 1, NO_NULL);
-    XQWL_SEARCH_POS.UndoNullMove();
-    if (vl >= vlBeta &&
-        (XQWL_SEARCH_POS.NullSafe() ||
-         -SearchFull(-vlBeta, 1 - vlBeta, nDepth - NULL_DEPTH, NO_NULL) >= vlBeta)) {
-      return vl;
+  bInCheck = XQWL_SEARCH_POS.InCheck();
+  if (nDepth >= IID_MIN_DEPTH && mvHash == 0 && !bInCheck) {
+    SearchFull(vlAlpha, vlBeta, nDepth - 2, NO_NULL);
+    (void)ProbeHash(vlAlpha, vlBeta, nDepth, mvHash);
+  }
+  if (!bNoNull && !bInCheck && XQWL_SEARCH_POS.NullOkay()) {
+    const int attack = XQWL_SEARCH_POS.AttackingPieceCount(XQWL_SEARCH_POS.sdPlayer);
+    if (attack > 0) {
+      const BOOL verifyNull = (attack < NULL_ATTACKING_MIN);
+      XQWL_SEARCH_POS.NullMove();
+      vl = -SearchFull(-vlBeta, 1 - vlBeta, nDepth - NULL_DEPTH - 1, NO_NULL);
+      XQWL_SEARCH_POS.UndoNullMove();
+      if (vl >= vlBeta) {
+        if (!verifyNull || XQWL_SEARCH_POS.NullSafe() ||
+            -SearchFull(-vlBeta, 1 - vlBeta, nDepth - NULL_DEPTH, NO_NULL) >= vlBeta) {
+          return vl;
+        }
+      }
     }
   }
   nHashFlag = HASH_ALPHA;
   vlBest = -MATE_VALUE;
   mvBest = 0;
-  bInCheck = XQWL_SEARCH_POS.InCheck();
   moveCount = 0;
+  BOOL ttSingularExtend = FALSE;
+  if (mvHash != 0 && nDepth >= SINGULAR_MIN_DEPTH && !bInCheck) {
+    const int singularBeta = vlAlpha;
+    BOOL hasRefutation = FALSE;
+    SortStruct sTest;
+    sTest.Init(mvHash);
+    (void)sTest.Next();
+    int othMv;
+    while ((othMv = sTest.Next()) != 0) {
+      if (XqwlSearchMakeMove(othMv)) {
+        const int td = (nDepth - 3) > 1 ? (nDepth - 3) : 1;
+        const int sv = -SearchFull(-singularBeta, -singularBeta + 1, td, NO_NULL);
+        XqwlSearchUndoMakeMove();
+        if (sv >= singularBeta) {
+          hasRefutation = TRUE;
+          break;
+        }
+      }
+    }
+    if (!hasRefutation) {
+      ttSingularExtend = TRUE;
+    }
+  }
   Sort.Init(mvHash);
   while ((mv = Sort.Next()) != 0) {
     moveCount++;
     const BOOL bCapture = IsCaptureMove(mv);
     if (XqwlSearchMakeMove(mv)) {
       nNewDepth = (XQWL_SEARCH_POS.InCheck() || Sort.singleReply) ? nDepth : nDepth - 1;
+      if (mv == mvHash && ttSingularExtend) {
+        ++nNewDepth;
+      }
       const BOOL bReduced = moveCount > LMR_MOVE_THRESHOLD && nDepth >= LMR_MIN_DEPTH && !bInCheck &&
-                            !bCapture && nNewDepth >= 2;
+                            !bCapture && nNewDepth >= 2 && !(mv == mvHash && ttSingularExtend);
       const int reducedDepth = nNewDepth - 1;
       if (vlBest == -MATE_VALUE) {
         if (bReduced) {
