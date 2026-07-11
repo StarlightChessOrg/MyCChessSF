@@ -86,9 +86,14 @@ else()
   message(STATUS "xqwlight_core: CPU '${CMAKE_SYSTEM_PROCESSOR}', scalar NNUE fallback")
 endif()
 
+set(_xqwl_include_dirs
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/inc"
+    "${CMAKE_CURRENT_SOURCE_DIR}")
+
 pybind11_add_module(xqwlight_core MODULE bindings.cpp ${_xqnnue_vnni_sources})
 
-target_include_directories(xqwlight_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(xqwlight_core PRIVATE ${_xqwl_include_dirs})
 target_compile_options(xqwlight_core PRIVATE -Wall -Wextra -Wno-sign-compare -fPIC ${_xqnnue_simd_flags})
 if(_xqnnue_vnni_sources)
   set_source_files_properties(xqwl_nnue_simd_vnni.cpp PROPERTIES COMPILE_FLAGS "-mavx512f -mavx512vnni -mavx512vl")
@@ -96,7 +101,7 @@ if(_xqnnue_vnni_sources)
 endif()
 
 add_executable(xqwl_gen_nnue gen_nnue_main.cpp ${_xqnnue_vnni_sources})
-target_include_directories(xqwl_gen_nnue PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(xqwl_gen_nnue PRIVATE ${_xqwl_include_dirs})
 target_compile_options(xqwl_gen_nnue PRIVATE -Wall -Wextra -Wno-sign-compare ${_xqnnue_simd_flags})
 if(_xqnnue_vnni_sources)
   set_source_files_properties(xqwl_nnue_simd_vnni.cpp PROPERTIES COMPILE_FLAGS "-mavx512f -mavx512vnni -mavx512vl")

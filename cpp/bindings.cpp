@@ -95,6 +95,7 @@ bool set_board_from_fen(PositionStruct &board, const std::string &fen) {
   }
   board.sdPlayer = red_to_move ? 0 : 1;
   board.nDistance = 0;
+  board.RefreshPst();
   board.SetIrrev();
   return true;
 }

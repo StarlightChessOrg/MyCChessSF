@@ -3,14 +3,20 @@
 ```
 MyCChessSF/
 ├── cpp/                          C++ 核心
-│   ├── xqwl_extract.inc          规则、走法、PST 评估
-│   ├── xqwl_search.inc           Alpha-Beta 搜索 + 开局库 hook
-│   ├── xqwl_nnue.inc             INT8 NNUE 推理 + 双视角累加器
-│   ├── xqwl_nnue_simd.h          SIMD 派发（Scalar / NEON / AVX2 / AVX512-VNNI）
-│   ├── xqwl_nnue_simd_vnni.cpp   AVX512-VNNI 独立编译单元
-│   ├── xqwl_fen.inc              内联 FEN 编解码
+│   ├── include/                  头文件
+│   │   ├── xqwl_portable_prefix.h
+│   │   ├── xqwl_nnue_simd.h
+│   │   └── xqwl_nnue_simd_vnni.h
+│   ├── inc/                      内联实现片段（.inc）
+│   │   ├── xqwl_extract.inc      规则、走法、PST 评估
+│   │   ├── xqwl_preeval*.inc     动态 PST 混合
+│   │   ├── xqwl_search.inc       Alpha-Beta 搜索 + 开局库 hook
+│   │   ├── xqwl_nnue.inc         INT8 NNUE 推理 + 双视角累加器
+│   │   └── xqwl_fen.inc          内联 FEN 编解码
 │   ├── bindings.cpp              pybind11 Python 绑定
 │   ├── gen_nnue_main.cpp         NNUE 训练数据生成器
+│   ├── xqwl_portable.cpp         引擎核心 umbrella include
+│   ├── xqwl_nnue_simd_vnni.cpp   AVX512-VNNI 独立编译单元
 │   └── CMakeLists.txt
 ├── mycchess_sf/                  Python 包
 │   ├── play_web.py               Sanic 网页对弈

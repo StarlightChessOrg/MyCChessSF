@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate cpp/xqwl_extract.inc with English comments from XQWL06 (GB18030)."""
+"""Regenerate cpp/inc/xqwl_extract.inc with English comments from XQWL06 (GB18030)."""
 from __future__ import annotations
 
 import re
@@ -7,8 +7,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 XQWL06 = ROOT.parent / "backups" / "xqwlight_source" / "Win32" / "XQWL06.CPP"
-OUT = ROOT / "cpp" / "xqwl_extract.inc"
-CURRENT = ROOT / "cpp" / "xqwl_extract.inc"
+OUT = ROOT / "cpp" / "inc" / "xqwl_extract.inc"
+CURRENT = ROOT / "cpp" / "inc" / "xqwl_extract.inc"
 
 # Simplified Chinese comment -> English (XQWL06 position core)
 TR = {
