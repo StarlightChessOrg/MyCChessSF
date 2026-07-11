@@ -15,6 +15,7 @@ if _cwd not in sys.path:
 
 from mycchess_sf.chess.session import GamePlay
 from mycchess_sf.iccs_util import parse_move_squares
+from mycchess_sf.move_desc import think_log_entry
 from mycchess_sf.xqwl_assets import (
     BOARD_EDGE,
     BOARD_HEIGHT,
@@ -62,7 +63,7 @@ class XqwlWebSession:
         self._toasts: list[dict[str, str]] = []
         self._sounds: list[str] = []
         self._ai_busy = False
-        self._ai_log: list[str] = []
+        self._think_log: list[dict[str, object]] = []
         self._ai_thinking: str = ""
         self._ai_timer: threading.Timer | None = None
 
@@ -209,7 +210,7 @@ class XqwlWebSession:
                 "ai_busy": self._ai_busy,
                 "current_strategy": self.strategy_red if side == "red" else self.strategy_black,
                 "ai_thinking": self._ai_thinking,
-                "ai_log": list(self._ai_log[-48:]),
+                "think_log": list(self._think_log[-60:]),
                 "board_w": BOARD_WIDTH,
                 "board_h": BOARD_HEIGHT,
                 "square": SQUARE_SIZE,
@@ -250,9 +251,7 @@ class XqwlWebSession:
             self.sel_from = None
             self.last_move = None
             self._ai_thinking = ""
-            self._ai_log.append("—— 新局 ——")
-            if len(self._ai_log) > 200:
-                self._ai_log[:] = self._ai_log[-120:]
+            self._think_log.clear()
         self.maybe_ai()
         return None
 
@@ -325,17 +324,17 @@ class XqwlWebSession:
             use_book = self._use_book and self._book_available
 
         def worker() -> None:
-            log_line = ""
             mv = ""
+            detail: dict = {}
             try:
                 with self._lock:
                     mode = "开局库+搜索" if use_book else "纯搜索"
                     self._ai_thinking = f"象棋小巫师思考中（{mode}，约 {think_ms} ms）…"
                 t0 = time.perf_counter()
                 pos = g_copy.raw_position()
-                mv = engine.search_best_iccs(pos, think_ms, use_book)
+                detail = dict(engine.search_best_detail(pos, think_ms, use_book))
+                mv = str(detail.get("iccs", "") or "")
                 elapsed = (time.perf_counter() - t0) * 1000.0
-                log_line = f"象棋小巫师 | {'库' if use_book else '搜'} | 着 {mv} | {elapsed:.0f} ms"
             except Exception as e:
                 with self._lock:
                     self._ai_busy = False
@@ -345,10 +344,20 @@ class XqwlWebSession:
             with self._lock:
                 self._ai_busy = False
                 self._ai_thinking = ""
-                if log_line:
-                    self._ai_log.append(log_line)
-                    if len(self._ai_log) > 200:
-                        self._ai_log[:] = self._ai_log[-120:]
+                if mv:
+                    arr = g_copy.board_view()
+                    x1, y1, _, _ = parse_move_squares(mv)
+                    piece_ch = str(arr[y1, x1])
+                    entry = think_log_entry(
+                        depth=int(detail.get("depth", 0)),
+                        elapsed_ms=elapsed,
+                        piece_ch=piece_ch,
+                        iccs=mv,
+                        from_book=bool(detail.get("from_book", False)),
+                    )
+                    self._think_log.append(entry)
+                    if len(self._think_log) > 200:
+                        self._think_log[:] = self._think_log[-120:]
                 if mv not in self._legal_strings():
                     self._toasts.append({"kind": "info", "title": "小巫师", "body": f"非法着法 {mv}"})
                     return
@@ -376,8 +385,8 @@ def _html_page() -> str:
       background:var(--bg);min-height:100vh}}
     .win{{max-width:1180px;margin:0 auto;padding:12px 16px 20px}}
     .titlebar{{font-size:15px;font-weight:600;margin-bottom:10px}}
-    .layout{{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:16px;align-items:start}}
-    @media(max-width:900px){{.layout{{grid-template-columns:1fr}}}}
+    .layout{{display:grid;grid-template-columns:minmax(200px,260px) minmax(0,1fr) 280px;gap:16px;align-items:start}}
+    @media(max-width:1100px){{.layout{{grid-template-columns:1fr}} .think-panel{{order:3}}}}
     .board-wrap{{display:flex;justify-content:center}}
     .board-shell{{background:#8b7355;padding:6px;border:1px solid #5c4a32;box-shadow:0 2px 8px rgba(0,0,0,.25)}}
     #board{{position:relative;width:min(var(--bw),calc(100vw - 36px));aspect-ratio:{bw} / {bh};
@@ -394,9 +403,15 @@ def _html_page() -> str:
     button{{margin-top:14px;cursor:pointer}}
     .check-row{{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px}}
     .check-row input{{width:16px;height:16px}}
+    .think-panel{{background:var(--panel);border:1px solid #b9a88d;padding:14px 16px;align-self:stretch}}
+    .think-panel h2{{font-size:15px;margin:0 0 8px}}
+    .think-panel .hint{{font-size:12px;color:#5c4a32;margin-bottom:10px}}
+    #think-log-body{{font-family:Consolas,"Microsoft YaHei",monospace;font-size:11px;line-height:1.5;
+      max-height:min(560px,calc(100vh - 120px));overflow:auto;background:rgba(255,255,255,.45);
+      padding:8px;border:1px solid #c9b89a}}
+    .think-line{{margin:0 0 8px;white-space:pre-wrap;word-break:break-word}}
     #status{{margin-top:12px;font-size:13px;min-height:3.5em;white-space:pre-wrap}}
-    #ai-log-body{{margin:8px 0 0;font-family:Consolas,monospace;font-size:11px;max-height:220px;overflow:auto;
-      background:rgba(255,255,255,.45);padding:8px;border:1px solid #c9b89a}}
+    #ai-thinking{{font-size:12px;color:#7a4b00;min-height:1.6em;margin-top:8px}}
     .ai-busy #board{{opacity:.94}}
     .ai-busy #board{{pointer-events:none}}
   </style>
@@ -405,6 +420,11 @@ def _html_page() -> str:
   <div class="win">
     <div class="titlebar">象棋小巫师</div>
     <div class="layout">
+      <div class="think-panel">
+        <h2>思考日志</h2>
+        <div class="hint">小巫师每步决策：深度、耗时、棋子与坐标</div>
+        <div id="think-log-body"></div>
+      </div>
       <div class="board-wrap">
         <div class="board-shell">
           <div id="board">
@@ -423,8 +443,7 @@ def _html_page() -> str:
         <button type="button" id="btn-new">新局</button>
         <button type="button" id="btn-flip">翻转棋盘</button>
         <div id="status"></div>
-        <div id="ai-thinking" style="font-size:12px;color:#7a4b00;min-height:1.6em"></div>
-        <pre id="ai-log-body"></pre>
+        <div id="ai-thinking"></div>
       </div>
     </div>
   </div>
@@ -437,7 +456,7 @@ def _html_page() -> str:
   const btnNew=document.getElementById("btn-new"), btnFlip=document.getElementById("btn-flip");
   const chkBook=document.getElementById("chk-book"), bookRow=document.getElementById("book-row");
   const chkSound=document.getElementById("chk-sound");
-  const aiThinkingEl=document.getElementById("ai-thinking"), aiLogBody=document.getElementById("ai-log-body");
+  const aiThinkingEl=document.getElementById("ai-thinking"), thinkLogBody=document.getElementById("think-log-body");
   let viewFlipY=false, userFlipped=false, pollTimer=null, lastSnap=null;
   const sounds={{}};
   ["click","illegal","move","move2","capture","capture2","check","check2","win","draw","loss"].forEach(function(n){{
@@ -480,6 +499,17 @@ def _html_page() -> str:
       addSprite("hl",snap.last_move[2],snap.last_move[3],"/static/xqwl/selected.png");
     }}
   }}
+  function renderThinkLog(entries){{
+    if(!thinkLogBody)return;
+    thinkLogBody.replaceChildren();
+    (entries||[]).forEach(function(e){{
+      var line=document.createElement("div");
+      line.className="think-line";
+      line.textContent=e.text||"";
+      thinkLogBody.appendChild(line);
+    }});
+    thinkLogBody.scrollTop=thinkLogBody.scrollHeight;
+  }}
   function applySnap(snap){{
     fillStrategiesOnce(snap.strategies||[]);
     selRed.value=snap.strategy_red; selBlack.value=snap.strategy_black;
@@ -492,7 +522,7 @@ def _html_page() -> str:
     }}
     statusEl.textContent=snap.status_text||"";
     if(aiThinkingEl)aiThinkingEl.textContent=snap.ai_thinking||"";
-    if(aiLogBody){{aiLogBody.textContent=(snap.ai_log||[]).join("\\n"); aiLogBody.scrollTop=aiLogBody.scrollHeight;}}
+    renderThinkLog(snap.think_log||[]);
     renderBoard(snap);
     shell.classList.toggle("ai-busy",!!snap.ai_busy);
     lastSnap=snap;

@@ -33,6 +33,8 @@ struct XqwlSearchCtx {
   int time_limit_ms;
   clock_t t_start;
   bool use_book;
+  int nLastDepth;
+  bool from_book;
 };
 
 static thread_local XqwlSearchCtx *g_xqwl_sc = nullptr;
@@ -441,6 +443,8 @@ static void SearchMain(void) {
   clock_t deadline =
       g_xqwl_sc->t_start + static_cast<clock_t>(g_xqwl_sc->time_limit_ms) * CLOCKS_PER_SEC / 1000;
 
+  g_xqwl_sc->nLastDepth = 0;
+  g_xqwl_sc->from_book = false;
   std::memset(XQWL_SEARCH_TAB.nHistoryTable, 0, 65536 * sizeof(int));
   std::memset(XQWL_SEARCH_TAB.mvKillers, 0, LIMIT_DEPTH * 2 * sizeof(int));
   std::memset(XQWL_SEARCH_TAB.HashTable, 0, HASH_SIZE * sizeof(HashItem));
@@ -452,6 +456,8 @@ static void SearchMain(void) {
       if (XQWL_SEARCH_POS.MakeMove(XQWL_SEARCH_TAB.mvResult)) {
         if (XQWL_SEARCH_POS.RepStatus(3) == 0) {
           XQWL_SEARCH_POS.UndoMakeMove();
+          g_xqwl_sc->from_book = true;
+          g_xqwl_sc->nLastDepth = 0;
           return;
         }
         XQWL_SEARCH_POS.UndoMakeMove();
@@ -474,6 +480,7 @@ static void SearchMain(void) {
 
   for (i = 1; i <= LIMIT_DEPTH; i++) {
     vl = SearchRoot(i);
+    g_xqwl_sc->nLastDepth = i;
     if (vl > WIN_VALUE || vl < -WIN_VALUE) {
       break;
     }
@@ -483,19 +490,31 @@ static void SearchMain(void) {
   }
 }
 
+/** Outcome of a search call (move + completed depth + book flag). */
+struct XqwlSearchOutcome {
+  int mv;
+  int depth;
+  bool from_book;
+};
+
 /** Search best move on a copy of ``position``; ``tables`` holds TT/book across calls. */
-inline int XqwlSearchBestMove(PositionStruct &position, XqwlSearchTables &tables, int time_limit_ms,
-                              bool use_book = true) {
+inline XqwlSearchOutcome XqwlSearchBestMoveEx(PositionStruct &position, XqwlSearchTables &tables, int time_limit_ms,
+                                              bool use_book = true) {
   if (time_limit_ms < 50) {
     time_limit_ms = 50;
   }
-  XqwlSearchCtx ctx{&position, &tables, time_limit_ms, std::clock(), use_book};
+  XqwlSearchCtx ctx{&position, &tables, time_limit_ms, std::clock(), use_book, 0, false};
   g_xqwl_sc = &ctx;
   tables.mvResult = 0;
   SearchMain();
-  const int mv = tables.mvResult;
+  const XqwlSearchOutcome out{tables.mvResult, ctx.nLastDepth, ctx.from_book};
   g_xqwl_sc = nullptr;
-  return mv;
+  return out;
+}
+
+inline int XqwlSearchBestMove(PositionStruct &position, XqwlSearchTables &tables, int time_limit_ms,
+                              bool use_book = true) {
+  return XqwlSearchBestMoveEx(position, tables, time_limit_ms, use_book).mv;
 }
 
 #endif // XQWL_SEARCH_INC

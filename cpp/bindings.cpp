@@ -202,7 +202,7 @@ struct XQWLEngine {
 
   std::string search_best_iccs(const XQWLPosition &position, int time_ms = 1000, bool use_book = true) {
     PositionStruct work = position.board;
-    const int mv = XqwlSearchBestMove(work, tab, time_ms, use_book);
+    const int mv = XqwlSearchBestMoveEx(work, tab, time_ms, use_book).mv;
     if (mv == 0)
       return "";
     return mv_to_iccs(mv);
@@ -210,7 +210,17 @@ struct XQWLEngine {
 
   int search_best_mv(const XQWLPosition &position, int time_ms = 1000, bool use_book = true) {
     PositionStruct work = position.board;
-    return XqwlSearchBestMove(work, tab, time_ms, use_book);
+    return XqwlSearchBestMoveEx(work, tab, time_ms, use_book).mv;
+  }
+
+  py::dict search_best_detail(const XQWLPosition &position, int time_ms = 1000, bool use_book = true) {
+    PositionStruct work = position.board;
+    const XqwlSearchOutcome out = XqwlSearchBestMoveEx(work, tab, time_ms, use_book);
+    py::dict d;
+    d["iccs"] = out.mv != 0 ? mv_to_iccs(out.mv) : "";
+    d["depth"] = out.depth;
+    d["from_book"] = out.from_book;
+    return d;
   }
 };
 
@@ -246,6 +256,8 @@ PYBIND11_MODULE(xqwlight_core, m) {
       .def("search_best_iccs", &XQWLEngine::search_best_iccs, py::arg("position"), py::arg("time_ms") = 1000,
            py::arg("use_book") = true)
       .def("search_best_mv", &XQWLEngine::search_best_mv, py::arg("position"), py::arg("time_ms") = 1000,
+           py::arg("use_book") = true)
+      .def("search_best_detail", &XQWLEngine::search_best_detail, py::arg("position"), py::arg("time_ms") = 1000,
            py::arg("use_book") = true);
 
   m.attr("MATE_VALUE") = MATE_VALUE;
