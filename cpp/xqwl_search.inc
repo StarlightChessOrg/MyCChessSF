@@ -4,6 +4,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <vector>
 
@@ -27,6 +28,18 @@ struct XqwlSearchTables {
   int nBookSize = 0;
   std::vector<BookItem> book_table;
   xqwl_nnue::Runtime *nnue = nullptr;
+
+  XqwlSearchTables() { clear(); }
+
+  void clear() {
+    mvResult = 0;
+    nBookSize = 0;
+    nnue = nullptr;
+    book_table.clear();
+    std::memset(nHistoryTable, 0, sizeof(nHistoryTable));
+    std::memset(mvKillers, 0, sizeof(mvKillers));
+    std::memset(HashTable, 0, sizeof(HashTable));
+  }
 };
 
 struct XqwlSearchCtx {

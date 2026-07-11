@@ -7,6 +7,7 @@
 - 自对弈采样：每个局面写一行，走子后继续；终局后 `Startup()` 重新开局
 - 走子策略：**20% 随机合法着** / **80% 引擎搜索结果**（可调）
 - **不使用开局库**
+- **评估函数**：若存在 NNUE 权重（`nnue_qINT8/output/quantized.xqnnue.bin` 或通过 `--nnue` 指定），搜索使用 NNUE；否则使用 PST。可用 `--pst-only` 强制 PST
 - `vl` 为**当前行棋方视角**的根节点搜索分（与 `search_best_detail()['score']` 一致）
 - FEN 在 C++ 内联编码（`cpp/xqwl_fen.inc`）
 - 多进程：`fork()` 启动 worker，默认进程数 = CPU 核数
@@ -34,6 +35,8 @@
 | `--think-ms` | `100` | 每局面搜索时限（毫秒） |
 | `--jobs` | `0`（= CPU 核数） | 并行 worker 数 |
 | `--random-pct` | `20` | 随机走子概率（0–100） |
+| `--nnue` | （自动检测） | NNUE 权重路径（`.xqnnue.bin`）；未找到则回退 PST |
+| `--pst-only` | — | 强制使用 PST，忽略 NNUE 权重 |
 
 ## 输出格式
 

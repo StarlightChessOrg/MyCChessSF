@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <sys/stat.h>
@@ -30,6 +31,9 @@ struct GenConfig {
   int think_ms = 100;
   int jobs = 0;
   int random_pct = 20;
+  std::string nnue_path;
+  bool pst_only = false;
+  bool nnue_path_set = false;
 };
 
 void usage(const char *prog) {
@@ -39,8 +43,33 @@ void usage(const char *prog) {
                "  --max-positions N      Total position cap (default: 10000000)\n"
                "  --think-ms MS          Search time per position (default: 100)\n"
                "  --jobs N               Parallel workers (0 = CPU cores, default: 0)\n"
-               "  --random-pct PCT       Random move probability 0-100 (default: 20)\n",
+               "  --random-pct PCT       Random move probability 0-100 (default: 20)\n"
+               "  --nnue PATH            NNUE weights (.xqnnue.bin); auto-detect if omitted\n"
+               "  --pst-only             Force PST eval even when NNUE weights exist\n",
                prog);
+}
+
+bool file_exists(const std::string &path) {
+  if (path.empty()) {
+    return false;
+  }
+  std::ifstream f(path, std::ios::binary);
+  return f.good();
+}
+
+std::string auto_detect_nnue_path() {
+  static const char *candidates[] = {
+      "nnue_qINT8/output/quantized.xqnnue.bin",
+      "deployment/nnue/quantized.xqnnue.bin",
+      "quantized.xqnnue.bin",
+      nullptr,
+  };
+  for (const char **p = candidates; *p != nullptr; ++p) {
+    if (file_exists(*p)) {
+      return *p;
+    }
+  }
+  return {};
 }
 
 bool parse_i64(const char *s, long long &out) {
@@ -102,6 +131,14 @@ bool parse_args(int argc, char **argv, GenConfig &cfg) {
         std::fprintf(stderr, "Invalid --random-pct (0-100)\n");
         return false;
       }
+    } else if (std::strcmp(arg, "--nnue") == 0) {
+      const char *v = need(arg);
+      if (v == nullptr)
+        return false;
+      cfg.nnue_path = v;
+      cfg.nnue_path_set = true;
+    } else if (std::strcmp(arg, "--pst-only") == 0) {
+      cfg.pst_only = true;
     } else if (std::strcmp(arg, "-h") == 0 || std::strcmp(arg, "--help") == 0) {
       usage(argv[0]);
       std::exit(0);
@@ -111,6 +148,19 @@ bool parse_args(int argc, char **argv, GenConfig &cfg) {
     }
   }
   return true;
+}
+
+void resolve_eval_mode(GenConfig &cfg) {
+  if (cfg.pst_only) {
+    cfg.nnue_path.clear();
+    return;
+  }
+  if (!cfg.nnue_path_set) {
+    cfg.nnue_path = auto_detect_nnue_path();
+  } else if (!file_exists(cfg.nnue_path)) {
+    std::fprintf(stderr, "[xqwl_gen_nnue] NNUE file not found: %s\n", cfg.nnue_path.c_str());
+    std::exit(1);
+  }
 }
 
 bool ensure_dir(const std::string &path) {
@@ -221,7 +271,16 @@ void worker_main(int worker_id, long long quota, const GenConfig &cfg) {
 
   // Hash table is ~16 MiB; keep off the stack (default thread stack is often 8 MiB).
   auto tab = std::make_unique<XqwlSearchTables>();
-  *tab = XqwlSearchTables{};
+  std::unique_ptr<xqwl_nnue::Runtime> nnue_rt;
+  if (!cfg.nnue_path.empty()) {
+    nnue_rt = std::make_unique<xqwl_nnue::Runtime>();
+    if (!nnue_rt->load(cfg.nnue_path.c_str())) {
+      std::fprintf(stderr, "[worker %d] failed to load NNUE: %s\n", worker_id, cfg.nnue_path.c_str());
+      std::exit(1);
+    }
+    tab->nnue = nnue_rt.get();
+  }
+
   PositionStruct pos;
   long long written = 0;
   long long skipped = 0;
@@ -281,6 +340,7 @@ int main(int argc, char **argv) {
     usage(argv[0]);
     return 1;
   }
+  resolve_eval_mode(cfg);
   if (!ensure_dir(cfg.output_dir)) {
     return 1;
   }
@@ -297,6 +357,11 @@ int main(int argc, char **argv) {
   std::fprintf(stderr,
                "[xqwl_gen_nnue] output=%s positions=%lld jobs=%d think_ms=%d random_pct=%d%%\n",
                cfg.output_dir.c_str(), cfg.max_positions, jobs, cfg.think_ms, cfg.random_pct);
+  if (cfg.nnue_path.empty()) {
+    std::fprintf(stderr, "[xqwl_gen_nnue] eval=PST (no NNUE weights found; use --nnue PATH or --pst-only)\n");
+  } else {
+    std::fprintf(stderr, "[xqwl_gen_nnue] eval=NNUE (%s)\n", cfg.nnue_path.c_str());
+  }
 
   std::vector<pid_t> children;
   children.reserve(static_cast<size_t>(jobs));
