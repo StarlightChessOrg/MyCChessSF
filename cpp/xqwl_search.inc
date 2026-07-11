@@ -370,9 +370,11 @@ inline void SetBestMove(int mv, int nDepth) {
   }
 }
 
+inline BOOL IsCaptureMove(int mv) { return XQWL_SEARCH_POS.ucpcSquares[DST(mv)] != 0; }
+
 static int SearchQuiesc(int vlAlpha, int vlBeta) {
-  int i, nGenMoves;
-  int vl, vlBest;
+  int i, nGenMoves, nHashFlag;
+  int vl, vlBest, mvHash, mvBest;
   int mvs[MAX_GEN_MOVES];
 
   vl = XQWL_SEARCH_POS.RepStatus();
@@ -382,7 +384,13 @@ static int SearchQuiesc(int vlAlpha, int vlBeta) {
   if (XQWL_SEARCH_POS.nDistance == LIMIT_DEPTH) {
     return XqwlEvalForSearch(XQWL_SEARCH_POS);
   }
+  vl = ProbeHash(vlAlpha, vlBeta, QUIESCENCE_TT_DEPTH, mvHash);
+  if (vl > -MATE_VALUE) {
+    return vl;
+  }
   vlBest = -MATE_VALUE;
+  mvBest = 0;
+  nHashFlag = HASH_ALPHA;
 
   if (XQWL_SEARCH_POS.InCheck()) {
     nGenMoves = XQWL_SEARCH_POS.GenerateMoves(mvs);
@@ -392,10 +400,12 @@ static int SearchQuiesc(int vlAlpha, int vlBeta) {
     if (vl > vlBest) {
       vlBest = vl;
       if (vl >= vlBeta) {
+        RecordHash(HASH_BETA, vl, QUIESCENCE_TT_DEPTH, 0);
         return vl;
       }
       if (vl > vlAlpha) {
         vlAlpha = vl;
+        nHashFlag = HASH_PV;
       }
     }
     nGenMoves = XQWL_SEARCH_POS.GenerateMoves(mvs, GEN_CAPTURE);
@@ -409,23 +419,31 @@ static int SearchQuiesc(int vlAlpha, int vlBeta) {
       XqwlSearchUndoMakeMove();
       if (vl > vlBest) {
         vlBest = vl;
+        mvBest = mvs[i];
         if (vl >= vlBeta) {
+          RecordHash(HASH_BETA, vlBest, QUIESCENCE_TT_DEPTH, mvBest);
           return vl;
         }
         if (vl > vlAlpha) {
           vlAlpha = vl;
+          nHashFlag = HASH_PV;
         }
       }
     }
   }
-  return vlBest == -MATE_VALUE ? XQWL_SEARCH_POS.nDistance - MATE_VALUE : vlBest;
+  if (vlBest == -MATE_VALUE) {
+    return XQWL_SEARCH_POS.nDistance - MATE_VALUE;
+  }
+  RecordHash(nHashFlag, vlBest, QUIESCENCE_TT_DEPTH, mvBest);
+  return vlBest;
 }
 
 const BOOL NO_NULL = TRUE;
 
 static int SearchFull(int vlAlpha, int vlBeta, int nDepth, BOOL bNoNull = FALSE) {
   int nHashFlag, vl, vlBest;
-  int mv, mvBest, mvHash, nNewDepth;
+  int mv, mvBest, mvHash, nNewDepth, moveCount;
+  BOOL bInCheck;
   SortStruct Sort;
 
   if (nDepth <= 0) {
@@ -455,14 +473,32 @@ static int SearchFull(int vlAlpha, int vlBeta, int nDepth, BOOL bNoNull = FALSE)
   nHashFlag = HASH_ALPHA;
   vlBest = -MATE_VALUE;
   mvBest = 0;
+  bInCheck = XQWL_SEARCH_POS.InCheck();
+  moveCount = 0;
   Sort.Init(mvHash);
   while ((mv = Sort.Next()) != 0) {
+    moveCount++;
+    const BOOL bCapture = IsCaptureMove(mv);
     if (XqwlSearchMakeMove(mv)) {
       nNewDepth = (XQWL_SEARCH_POS.InCheck() || Sort.singleReply) ? nDepth : nDepth - 1;
+      const BOOL bReduced = moveCount > LMR_MOVE_THRESHOLD && nDepth >= LMR_MIN_DEPTH && !bInCheck &&
+                            !bCapture && nNewDepth >= 2;
+      const int reducedDepth = nNewDepth - 1;
       if (vlBest == -MATE_VALUE) {
-        vl = -SearchFull(-vlBeta, -vlAlpha, nNewDepth);
+        if (bReduced) {
+          vl = -SearchFull(-vlBeta, -vlAlpha, reducedDepth);
+          if (vl > vlAlpha) {
+            vl = -SearchFull(-vlBeta, -vlAlpha, nNewDepth);
+          }
+        } else {
+          vl = -SearchFull(-vlBeta, -vlAlpha, nNewDepth);
+        }
       } else {
-        vl = -SearchFull(-vlAlpha - 1, -vlAlpha, nNewDepth);
+        if (bReduced) {
+          vl = -SearchFull(-vlAlpha - 1, -vlAlpha, reducedDepth);
+        } else {
+          vl = -SearchFull(-vlAlpha - 1, -vlAlpha, nNewDepth);
+        }
         if (vl > vlAlpha && vl < vlBeta) {
           vl = -SearchFull(-vlBeta, -vlAlpha, nNewDepth);
         }
@@ -512,7 +548,7 @@ static BOOL SearchUnique(int vlBeta, int nDepth) {
   return TRUE;
 }
 
-static int SearchRoot(int nDepth) {
+static int SearchRoot(int nDepth, int vlAlpha, int vlBeta) {
   int vl, vlBest, mv, nNewDepth;
   SortStruct Sort;
 
@@ -522,11 +558,11 @@ static int SearchRoot(int nDepth) {
     if (XqwlSearchMakeMove(mv)) {
       nNewDepth = (XQWL_SEARCH_POS.InCheck() || Sort.singleReply) ? nDepth : nDepth - 1;
       if (vlBest == -MATE_VALUE) {
-        vl = -SearchFull(-MATE_VALUE, MATE_VALUE, nNewDepth, NO_NULL);
+        vl = -SearchFull(-vlBeta, -vlAlpha, nNewDepth, NO_NULL);
       } else {
         vl = -SearchFull(-vlBest - 1, -vlBest, nNewDepth);
         if (vl > vlBest) {
-          vl = -SearchFull(-MATE_VALUE, -vlBest, nNewDepth, NO_NULL);
+          vl = -SearchFull(-vlBeta, -vlBest, nNewDepth, NO_NULL);
         }
       }
       XqwlSearchUndoMakeMove();
@@ -555,7 +591,6 @@ static void SearchMain(void) {
   g_xqwl_sc->from_book = false;
   std::memset(XQWL_SEARCH_TAB.nHistoryTable, 0, 65536 * sizeof(int));
   std::memset(XQWL_SEARCH_TAB.mvKillers, 0, LIMIT_DEPTH * 2 * sizeof(int));
-  std::memset(XQWL_SEARCH_TAB.HashTable, 0, HASH_SIZE * sizeof(HashItem));
   XQWL_SEARCH_POS.nDistance = 0;
 
   if (g_xqwl_sc->tab->nnue != nullptr && g_xqwl_sc->tab->nnue->loaded) {
@@ -591,12 +626,27 @@ static void SearchMain(void) {
   }
   if (vl == 1) {
     g_xqwl_sc->nLastDepth = 1;
-    g_xqwl_sc->nLastScore = SearchRoot(1);
+    g_xqwl_sc->nLastScore = SearchRoot(1, -MATE_VALUE, MATE_VALUE);
     return;
   }
 
   for (i = 1; i <= LIMIT_DEPTH; i++) {
-    vl = SearchRoot(i);
+    int delta = ASPIRATION_DELTA;
+    int alpha = g_xqwl_sc->nLastScore - delta;
+    int beta = g_xqwl_sc->nLastScore + delta;
+    while (true) {
+      vl = SearchRoot(i, alpha, beta);
+      if (vl <= alpha) {
+        alpha = -MATE_VALUE;
+      } else if (vl >= beta) {
+        beta = MATE_VALUE;
+      } else {
+        break;
+      }
+      if (alpha <= -WIN_VALUE && beta >= WIN_VALUE) {
+        break;
+      }
+    }
     g_xqwl_sc->nLastDepth = i;
     g_xqwl_sc->nLastScore = vl;
     if (vl > WIN_VALUE || vl < -WIN_VALUE) {
