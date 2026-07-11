@@ -1,4 +1,7 @@
-﻿// �ж������Ƿ��������е�����
+// XQWL06 position core (portable extract; English comments)
+// Source: backups/xqwlight_source/Win32/XQWL06.CPP
+
+// Square-on-board lookup table (256-byte board index)
 static const char ccInBoard[256] = {
   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -18,7 +21,7 @@ static const char ccInBoard[256] = {
   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 };
 
-// �ж������Ƿ��ھŹ�������
+// Palace (fort) membership lookup table
 static const char ccInFort[256] = {
   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -38,7 +41,7 @@ static const char ccInFort[256] = {
   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 };
 
-// �жϲ����Ƿ�����ض��߷������飬1=˧(��)��2=��(ʿ)��3=��(��)
+// Legal step span table: 1=king, 2=advisor, 3=bishop
 static const char ccLegalSpan[512] = {
                        0, 0, 0, 0, 0, 0, 0, 0, 0,
   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -75,7 +78,7 @@ static const char ccLegalSpan[512] = {
   0, 0, 0, 0, 0, 0, 0
 };
 
-// ���ݲ����ж����Ƿ����ȵ�����
+// Knight leg-block offset table
 static const char ccKnightPin[512] = {
                               0,  0,  0,  0,  0,  0,  0,  0,  0,
   0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
@@ -112,16 +115,16 @@ static const char ccKnightPin[512] = {
   0,  0,  0,  0,  0,  0,  0
 };
 
-// ˧(��)�Ĳ���
+// King step deltas
 static const char ccKingDelta[4] = {-16, -1, 1, 16};
-// ��(ʿ)�Ĳ���
+// Advisor step deltas
 static const char ccAdvisorDelta[4] = {-17, -15, 15, 17};
-// ��Ĳ�������˧(��)�Ĳ�����Ϊ����
+// Knight leaps (king delta used as leg check)
 static const char ccKnightDelta[4][2] = {{-33, -31}, {-18, 14}, {-14, 18}, {31, 33}};
-// ��������Ĳ���������(ʿ)�Ĳ�����Ϊ����
+// Knight check deltas (advisor delta as leg)
 static const char ccKnightCheckDelta[4][2] = {{-33, -18}, {-31, -14}, {14, 31}, {18, 33}};
 
-// ���̳�ʼ����
+// Standard starting layout
 static const BYTE cucpcStartup[256] = {
   0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
   0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
@@ -141,9 +144,9 @@ static const BYTE cucpcStartup[256] = {
   0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
 };
 
-// ����λ�ü�ֵ��
+// Piece-square evaluation tables
 static const BYTE cucvlPiecePos[7][256] = {
-  { // ˧(��)
+  { // King
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
@@ -160,7 +163,7 @@ static const BYTE cucvlPiecePos[7][256] = {
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
-  }, { // ��(ʿ)
+  }, { // Advisor
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
@@ -177,7 +180,7 @@ static const BYTE cucvlPiecePos[7][256] = {
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
-  }, { // ��(��)
+  }, { // Bishop
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
@@ -194,7 +197,7 @@ static const BYTE cucvlPiecePos[7][256] = {
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
-  }, { // ��
+  }, { // Knight
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
@@ -211,7 +214,7 @@ static const BYTE cucvlPiecePos[7][256] = {
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
-  }, { // ��
+  }, { // Rook
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
@@ -228,7 +231,7 @@ static const BYTE cucvlPiecePos[7][256] = {
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
-  }, { // ��
+  }, { // Cannon
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
@@ -245,7 +248,7 @@ static const BYTE cucvlPiecePos[7][256] = {
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0
-  }, { // ��(��)
+  }, { // Pawn
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
@@ -265,143 +268,143 @@ static const BYTE cucvlPiecePos[7][256] = {
   }
 };
 
-// �ж������Ƿ���������
+// Whether a square index is on the board
 inline BOOL IN_BOARD(int sq) {
   return ccInBoard[sq] != 0;
 }
 
-// �ж������Ƿ��ھŹ���
+// Whether a square is inside a palace
 inline BOOL IN_FORT(int sq) {
   return ccInFort[sq] != 0;
 }
 
-// ��ø��ӵĺ�����
+// Rank (y) of a square index
 inline int RANK_Y(int sq) {
   return sq >> 4;
 }
 
-// ��ø��ӵ�������
+// File (x) of a square index
 inline int FILE_X(int sq) {
   return sq & 15;
 }
 
-// ����������ͺ������ø���
+// Pack file/rank into square index
 inline int COORD_XY(int x, int y) {
   return x + (y << 4);
 }
 
-// ��ת����
+// Flip square vertically (mirror rank)
 inline int SQUARE_FLIP(int sq) {
   return 254 - sq;
 }
 
-// ������ˮƽ����
+// Mirror file coordinate
 inline int FILE_FLIP(int x) {
   return 14 - x;
 }
 
-// �����괹ֱ����
+// Mirror rank coordinate
 inline int RANK_FLIP(int y) {
   return 15 - y;
 }
 
-// ����ˮƽ����
+// Mirror square horizontally (file flip)
 inline int MIRROR_SQUARE(int sq) {
   return COORD_XY(FILE_FLIP(FILE_X(sq)), RANK_Y(sq));
 }
 
-// ����ˮƽ����
+// Mirror square horizontally (file flip)
 inline int SQUARE_FORWARD(int sq, int sd) {
   return sq - 16 + (sd << 5);
 }
 
-// �߷��Ƿ����˧(��)�Ĳ���
+// King step span check
 inline BOOL KING_SPAN(int sqSrc, int sqDst) {
   return ccLegalSpan[sqDst - sqSrc + 256] == 1;
 }
 
-// �߷��Ƿ������(ʿ)�Ĳ���
+// Advisor step span check
 inline BOOL ADVISOR_SPAN(int sqSrc, int sqDst) {
   return ccLegalSpan[sqDst - sqSrc + 256] == 2;
 }
 
-// �߷��Ƿ������(��)�Ĳ���
+// Bishop step span check
 inline BOOL BISHOP_SPAN(int sqSrc, int sqDst) {
   return ccLegalSpan[sqDst - sqSrc + 256] == 3;
 }
 
-// ��(��)�۵�λ��
+// Bishop blocking eye square
 inline int BISHOP_PIN(int sqSrc, int sqDst) {
   return (sqSrc + sqDst) >> 1;
 }
 
-// ���ȵ�λ��
+// Knight leg square
 inline int KNIGHT_PIN(int sqSrc, int sqDst) {
   return sqSrc + ccKnightPin[sqDst - sqSrc + 256];
 }
 
-// �Ƿ�δ����
+// Square on home side of river
 inline BOOL HOME_HALF(int sq, int sd) {
   return (sq & 0x80) != (sd << 7);
 }
 
-// �Ƿ��ѹ���
+// Square on away side of river
 inline BOOL AWAY_HALF(int sq, int sd) {
   return (sq & 0x80) == (sd << 7);
 }
 
-// �Ƿ��ںӵ�ͬһ��
+// Both squares on same river half
 inline BOOL SAME_HALF(int sqSrc, int sqDst) {
   return ((sqSrc ^ sqDst) & 0x80) == 0;
 }
 
-// �Ƿ���ͬһ��
+// Same rank
 inline BOOL SAME_RANK(int sqSrc, int sqDst) {
   return ((sqSrc ^ sqDst) & 0xf0) == 0;
 }
 
-// �Ƿ���ͬһ��
+// Same file
 inline BOOL SAME_FILE(int sqSrc, int sqDst) {
   return ((sqSrc ^ sqDst) & 0x0f) == 0;
 }
 
-// ��ú�ڱ��(������8��������16)
+// Side tag (red=8, black=16)
 inline int SIDE_TAG(int sd) {
   return 8 + (sd << 3);
 }
 
-// ��öԷ���ڱ��
+// Opponent side tag
 inline int OPP_SIDE_TAG(int sd) {
   return 16 - (sd << 3);
 }
 
-// ����߷������
+// Move source square
 inline int SRC(int mv) {
   return mv & 255;
 }
 
-// ����߷����յ�
+// Move destination square
 inline int DST(int mv) {
   return mv >> 8;
 }
 
-// ���������յ����߷�
+// Pack move from src/dst
 inline int MOVE(int sqSrc, int sqDst) {
   return sqSrc + sqDst * 256;
 }
 
-// �߷�ˮƽ����
+// Mirror move horizontally
 inline int MIRROR_MOVE(int mv) {
   return MOVE(MIRROR_SQUARE(SRC(mv)), MIRROR_SQUARE(DST(mv)));
 }
 
-// RC4������������
+// RC4 keystream generator (Zobrist init)
 struct RC4Struct {
   BYTE s[256];
   int x, y;
 
-  void InitZero(void);   // �ÿ���Կ��ʼ��������������
-  BYTE NextByte(void) {  // ��������������һ���ֽ�
+  void InitZero(void);   // Initialize RC4 with empty key
+  BYTE NextByte(void) {  // Next RC4 byte
     BYTE uc;
     x = (x + 1) & 255;
     y = (y + s[x]) & 255;
@@ -410,7 +413,7 @@ struct RC4Struct {
     s[y] = uc;
     return s[(s[x] + s[y]) & 255];
   }
-  DWORD NextLong(void) { // ���������������ĸ��ֽ�
+  DWORD NextLong(void) { // Next four RC4 bytes as DWORD
     BYTE uc0, uc1, uc2, uc3;
     uc0 = NextByte();
     uc1 = NextByte();
@@ -420,7 +423,7 @@ struct RC4Struct {
   }
 };
 
-// �ÿ���Կ��ʼ��������������
+// Initialize RC4 with empty key
 void RC4Struct::InitZero(void) {
   int i, j;
   BYTE uc;
@@ -437,19 +440,19 @@ void RC4Struct::InitZero(void) {
   }
 }
 
-// Zobrist�ṹ
+// Zobrist hash triple
 struct ZobristStruct {
   DWORD dwKey, dwLock0, dwLock1;
 
-  void InitZero(void) {                 // �������Zobrist
+  void InitZero(void) {                 // Zero Zobrist keys
     dwKey = dwLock0 = dwLock1 = 0;
   }
-  void InitRC4(RC4Struct &rc4) {        // �����������Zobrist
+  void InitRC4(RC4Struct &rc4) {        // Fill Zobrist from RC4
     dwKey = rc4.NextLong();
     dwLock0 = rc4.NextLong();
     dwLock1 = rc4.NextLong();
   }
-  void Xor(const ZobristStruct &zobr) { // ִ��XOR����
+  void Xor(const ZobristStruct &zobr) { // XOR Zobrist keys
     dwKey ^= zobr.dwKey;
     dwLock0 ^= zobr.dwLock0;
     dwLock1 ^= zobr.dwLock1;
@@ -461,13 +464,13 @@ struct ZobristStruct {
   }
 };
 
-// Zobrist��
+// Global Zobrist tables
 static struct {
   ZobristStruct Player;
   ZobristStruct Table[14][256];
 } Zobrist;
 
-// ��ʼ��Zobrist��
+// Initialize Zobrist tables
 static void InitZobrist(void) {
   int i, j;
   RC4Struct rc4;
@@ -481,7 +484,7 @@ static void InitZobrist(void) {
   }
 }
 
-// ��ʷ�߷���Ϣ(ռ4�ֽ�)
+// Move history entry (4 bytes)
 struct MoveStruct {
   WORD wmv;
   BYTE ucpcCaptured, ucbCheck;
@@ -495,32 +498,32 @@ struct MoveStruct {
   }
 }; // mvs
 
-// ����ṹ
+// Position state
 struct PositionStruct {
-  int sdPlayer;                   // �ֵ�˭�ߣ�0=�췽��1=�ڷ�
-  BYTE ucpcSquares[256];          // �����ϵ�����
-  int vlWhite, vlBlack;           // �졢��˫����������ֵ
-  int nDistance, nMoveNum;        // ������ڵ�Ĳ�������ʷ�߷���
-  MoveStruct mvsList[MAX_MOVES];  // ��ʷ�߷���Ϣ�б�
+  int sdPlayer;                   // Side to move: 0=red, 1=black
+  BYTE ucpcSquares[256];          // Board piece bytes
+  int vlWhite, vlBlack;           // Material scores for red/black
+  int nDistance, nMoveNum;        // Search ply and move-list length
+  MoveStruct mvsList[MAX_MOVES];  // Move history stack
   ZobristStruct zobr;             // Zobrist
 
-  void ClearBoard(void) {         // �������
+  void ClearBoard(void) {         // Clear board and scores
     sdPlayer = vlWhite = vlBlack = nDistance = 0;
     memset(ucpcSquares, 0, 256);
     zobr.InitZero();
   }
-  void SetIrrev(void) {           // ���(��ʼ��)��ʷ�߷���Ϣ
+  void SetIrrev(void) {           // Reset irreversible move list
     mvsList[0].Set(0, 0, Checked(), zobr.dwKey);
     nMoveNum = 1;
   }
-  void Startup(void);             // ��ʼ������
-  void ChangeSide(void) {         // �������ӷ�
+  void Startup(void);             // Set standard start position
+  void ChangeSide(void) {         // Switch side to move
     sdPlayer = 1 - sdPlayer;
     zobr.Xor(Zobrist.Player);
   }
-  void AddPiece(int sq, int pc) { // �������Ϸ�һö����
+  void AddPiece(int sq, int pc) { // Place piece and update hash/score
     ucpcSquares[sq] = pc;
-    // �췽�ӷ֣��ڷ�(ע��"cucvlPiecePos"ȡֵҪ�ߵ�)����
+    // Red adds PST; black uses flipped square index
     if (pc < 16) {
       vlWhite += cucvlPiecePos[pc - 8][sq];
       zobr.Xor(Zobrist.Table[pc - 8][sq]);
@@ -529,9 +532,9 @@ struct PositionStruct {
       zobr.Xor(Zobrist.Table[pc - 9][sq]);
     }
   }
-  void DelPiece(int sq, int pc) { // ������������һö����
+  void DelPiece(int sq, int pc) { // Remove piece and update hash/score
     ucpcSquares[sq] = 0;
-    // �췽���֣��ڷ�(ע��"cucvlPiecePos"ȡֵҪ�ߵ�)�ӷ�
+    // Red subtracts PST; black uses flipped index
     if (pc < 16) {
       vlWhite -= cucvlPiecePos[pc - 8][sq];
       zobr.Xor(Zobrist.Table[pc - 8][sq]);
@@ -540,28 +543,25 @@ struct PositionStruct {
       zobr.Xor(Zobrist.Table[pc - 9][sq]);
     }
   }
-  int Evaluate(void) const {      // �������ۺ���
+  int Evaluate(void) const {      // Static evaluation from side to move
     return (sdPlayer == 0 ? vlWhite - vlBlack : vlBlack - vlWhite) + ADVANCED_VALUE;
   }
-  BOOL InCheck(void) const {      // �Ƿ񱻽���
+  BOOL InCheck(void) const {      // Was side to move in check after last move
     return mvsList[nMoveNum - 1].ucbCheck;
   }
-  BOOL Captured(void) const {     // ��һ���Ƿ����
+  BOOL Captured(void) const {     // Was last move a capture
     return mvsList[nMoveNum - 1].ucpcCaptured != 0;
   }
-  int MovePiece(int mv);                      // ��һ���������
-  void UndoMovePiece(int mv, int pcCaptured); // ������һ���������
-  BOOL MakeMove(int mv);                      // ��һ����
-  void UndoMakeMove(void) {                   // ������һ����
+  int MovePiece(int mv);                      // Apply move on board (no side change)
+  void UndoMovePiece(int mv, int pcCaptured); // Undo board move
+  BOOL MakeMove(int mv);                      // Make legal move (reject if leaves king in check)
+  void UndoMakeMove(void) {                   // Undo one ply
     nDistance --;
     nMoveNum --;
     ChangeSide();
     UndoMovePiece(mvsList[nMoveNum].wmv, mvsList[nMoveNum].ucpcCaptured);
   }
-  void NullMove(void) {                       // ��һ���ղ�
-    if (nMoveNum >= MAX_MOVES) {
-      return;
-    }
+  void NullMove(void) {                       // Null move for pruning
     DWORD dwKey;
     dwKey = zobr.dwKey;
     ChangeSide();
@@ -569,33 +569,33 @@ struct PositionStruct {
     nMoveNum ++;
     nDistance ++;
   }
-  void UndoNullMove(void) {                   // ������һ���ղ�
+  void UndoNullMove(void) {                   // Undo null move
     nDistance --;
     nMoveNum --;
     ChangeSide();
   }
-  // ���������߷������"bCapture"Ϊ"TRUE"��ֻ���ɳ����߷�
+  // Generate pseudo-legal moves; captures only if bCapture
   int GenerateMoves(int *mvs, BOOL bCapture = FALSE) const;
-  BOOL LegalMove(int mv) const;               // �ж��߷��Ƿ����
-  BOOL Checked(void) const;                   // �ж��Ƿ񱻽���
-  BOOL IsMate(void);                          // �ж��Ƿ�ɱ
-  int DrawValue(void) const {                 // �����ֵ
+  BOOL LegalMove(int mv) const;               // Pseudo-legal move geometry (no check test)
+  BOOL Checked(void) const;                   // Is side to move in check now
+  BOOL IsMate(void);                          // Is checkmate
+  int DrawValue(void) const {                 // Draw score by ply parity
     return (nDistance & 1) == 0 ? -DRAW_VALUE : DRAW_VALUE;
   }
-  int RepStatus(int nRecur = 1) const;        // ����ظ�����
-  int RepValue(int nRepStatus) const {        // �ظ������ֵ
+  int RepStatus(int nRecur = 1) const;        // Detect repetition along move list
+  int RepValue(int nRepStatus) const {        // Score for repetition adjudication
     int vlReturn;
     vlReturn = ((nRepStatus & 2) == 0 ? 0 : nDistance - BAN_VALUE) +
         ((nRepStatus & 4) == 0 ? 0 : BAN_VALUE - nDistance);
     return vlReturn == 0 ? DrawValue() : vlReturn;
   }
-  BOOL NullOkay(void) const {                 // �ж��Ƿ�����ղ��ü�
+  BOOL NullOkay(void) const {                 // Null-move pruning material threshold
     return (sdPlayer == 0 ? vlWhite : vlBlack) > NULL_MARGIN;
   }
-  void Mirror(PositionStruct &posMirror) const; // �Ծ��澵��
+  void Mirror(PositionStruct &posMirror) const; // Build horizontally mirrored copy
 };
 
-// ��ʼ������
+// Set standard start position
 void PositionStruct::Startup(void) {
   int sq, pc;
   ClearBoard();
@@ -608,7 +608,7 @@ void PositionStruct::Startup(void) {
   SetIrrev();
 }
 
-// ��һ���������
+// Apply move on board (no side change)
 int PositionStruct::MovePiece(int mv) {
   int sqSrc, sqDst, pc, pcCaptured;
   sqSrc = SRC(mv);
@@ -623,7 +623,7 @@ int PositionStruct::MovePiece(int mv) {
   return pcCaptured;
 }
 
-// ������һ���������
+// Undo board move
 void PositionStruct::UndoMovePiece(int mv, int pcCaptured) {
   int sqSrc, sqDst, pc;
   sqSrc = SRC(mv);
@@ -636,7 +636,7 @@ void PositionStruct::UndoMovePiece(int mv, int pcCaptured) {
   }
 }
 
-// ��һ����
+// Make legal move (reject if leaves king in check)
 BOOL PositionStruct::MakeMove(int mv) {
   if (nMoveNum >= MAX_MOVES) {
     return FALSE;
@@ -657,14 +657,14 @@ BOOL PositionStruct::MakeMove(int mv) {
   return TRUE;
 }
 
-// "GenerateMoves"����
+// GenerateMoves flag
 const BOOL GEN_CAPTURE = TRUE;
 
-// ���������߷������"bCapture"Ϊ"TRUE"��ֻ���ɳ����߷�
+// Generate pseudo-legal moves; captures only if bCapture
 int PositionStruct::GenerateMoves(int *mvs, BOOL bCapture) const {
   int i, j, nGenMoves, nDelta, sqSrc, sqDst;
   int pcSelfSide, pcOppSide, pcSrc, pcDst;
-  // ���������߷�����Ҫ�������¼������裺
+  // Move generation steps:
 
   nGenMoves = 0;
   const auto push_mv = [&](int mv) -> bool {
@@ -678,13 +678,13 @@ int PositionStruct::GenerateMoves(int *mvs, BOOL bCapture) const {
   pcOppSide = OPP_SIDE_TAG(sdPlayer);
   for (sqSrc = 0; sqSrc < 256; sqSrc ++) {
 
-    // 1. �ҵ�һ���������ӣ����������жϣ�
+    // 1. Skip unless square holds own piece
     pcSrc = ucpcSquares[sqSrc];
     if ((pcSrc & pcSelfSide) == 0) {
       continue;
     }
 
-    // 2. ��������ȷ���߷�
+    // 2. Emit moves by piece type
     switch (pcSrc - pcSelfSide) {
     case PIECE_KING:
       for (i = 0; i < 4; i ++) {
@@ -694,9 +694,8 @@ int PositionStruct::GenerateMoves(int *mvs, BOOL bCapture) const {
         }
         pcDst = ucpcSquares[sqDst];
         if (bCapture ? (pcDst & pcOppSide) != 0 : (pcDst & pcSelfSide) == 0) {
-          if (!push_mv(MOVE(sqSrc, sqDst))) {
-            return nGenMoves;
-          }
+          mvs[nGenMoves] = MOVE(sqSrc, sqDst);
+          nGenMoves ++;
         }
       }
       break;
@@ -708,9 +707,8 @@ int PositionStruct::GenerateMoves(int *mvs, BOOL bCapture) const {
         }
         pcDst = ucpcSquares[sqDst];
         if (bCapture ? (pcDst & pcOppSide) != 0 : (pcDst & pcSelfSide) == 0) {
-          if (!push_mv(MOVE(sqSrc, sqDst))) {
-            return nGenMoves;
-          }
+          mvs[nGenMoves] = MOVE(sqSrc, sqDst);
+          nGenMoves ++;
         }
       }
       break;
@@ -723,9 +721,8 @@ int PositionStruct::GenerateMoves(int *mvs, BOOL bCapture) const {
         sqDst += ccAdvisorDelta[i];
         pcDst = ucpcSquares[sqDst];
         if (bCapture ? (pcDst & pcOppSide) != 0 : (pcDst & pcSelfSide) == 0) {
-          if (!push_mv(MOVE(sqSrc, sqDst))) {
-            return nGenMoves;
-          }
+          mvs[nGenMoves] = MOVE(sqSrc, sqDst);
+          nGenMoves ++;
         }
       }
       break;
@@ -742,9 +739,8 @@ int PositionStruct::GenerateMoves(int *mvs, BOOL bCapture) const {
           }
           pcDst = ucpcSquares[sqDst];
           if (bCapture ? (pcDst & pcOppSide) != 0 : (pcDst & pcSelfSide) == 0) {
-            if (!push_mv(MOVE(sqSrc, sqDst))) {
-              return nGenMoves;
-            }
+            mvs[nGenMoves] = MOVE(sqSrc, sqDst);
+            nGenMoves ++;
           }
         }
       }
@@ -757,15 +753,13 @@ int PositionStruct::GenerateMoves(int *mvs, BOOL bCapture) const {
           pcDst = ucpcSquares[sqDst];
           if (pcDst == 0) {
             if (!bCapture) {
-              if (!push_mv(MOVE(sqSrc, sqDst))) {
-                return nGenMoves;
-              }
+              mvs[nGenMoves] = MOVE(sqSrc, sqDst);
+              nGenMoves ++;
             }
           } else {
             if ((pcDst & pcOppSide) != 0) {
-              if (!push_mv(MOVE(sqSrc, sqDst))) {
-                return nGenMoves;
-              }
+              mvs[nGenMoves] = MOVE(sqSrc, sqDst);
+              nGenMoves ++;
             }
             break;
           }
@@ -781,9 +775,8 @@ int PositionStruct::GenerateMoves(int *mvs, BOOL bCapture) const {
           pcDst = ucpcSquares[sqDst];
           if (pcDst == 0) {
             if (!bCapture) {
-              if (!push_mv(MOVE(sqSrc, sqDst))) {
-                return nGenMoves;
-              }
+              mvs[nGenMoves] = MOVE(sqSrc, sqDst);
+              nGenMoves ++;
             }
           } else {
             break;
@@ -795,9 +788,8 @@ int PositionStruct::GenerateMoves(int *mvs, BOOL bCapture) const {
           pcDst = ucpcSquares[sqDst];
           if (pcDst != 0) {
             if ((pcDst & pcOppSide) != 0) {
-              if (!push_mv(MOVE(sqSrc, sqDst))) {
-                return nGenMoves;
-              }
+              mvs[nGenMoves] = MOVE(sqSrc, sqDst);
+              nGenMoves ++;
             }
             break;
           }
@@ -810,9 +802,8 @@ int PositionStruct::GenerateMoves(int *mvs, BOOL bCapture) const {
       if (IN_BOARD(sqDst)) {
         pcDst = ucpcSquares[sqDst];
         if (bCapture ? (pcDst & pcOppSide) != 0 : (pcDst & pcSelfSide) == 0) {
-          if (!push_mv(MOVE(sqSrc, sqDst))) {
-            return nGenMoves;
-          }
+          mvs[nGenMoves] = MOVE(sqSrc, sqDst);
+          nGenMoves ++;
         }
       }
       if (AWAY_HALF(sqSrc, sdPlayer)) {
@@ -821,9 +812,8 @@ int PositionStruct::GenerateMoves(int *mvs, BOOL bCapture) const {
           if (IN_BOARD(sqDst)) {
             pcDst = ucpcSquares[sqDst];
             if (bCapture ? (pcDst & pcOppSide) != 0 : (pcDst & pcSelfSide) == 0) {
-              if (!push_mv(MOVE(sqSrc, sqDst))) {
-                return nGenMoves;
-              }
+              mvs[nGenMoves] = MOVE(sqSrc, sqDst);
+              nGenMoves ++;
             }
           }
         }
@@ -834,13 +824,13 @@ int PositionStruct::GenerateMoves(int *mvs, BOOL bCapture) const {
   return nGenMoves;
 }
 
-// �ж��߷��Ƿ����
+// Pseudo-legal move geometry (no check test)
 BOOL PositionStruct::LegalMove(int mv) const {
   int sqSrc, sqDst, sqPin;
   int pcSelfSide, pcSrc, pcDst, nDelta;
-  // �ж��߷��Ƿ�Ϸ�����Ҫ�������µ��жϹ��̣�
+  // LegalMove checks:
 
-  // 1. �ж���ʼ���Ƿ����Լ�������
+  // 1. Source square must hold own piece
   sqSrc = SRC(mv);
   pcSrc = ucpcSquares[sqSrc];
   pcSelfSide = SIDE_TAG(sdPlayer);
@@ -848,14 +838,14 @@ BOOL PositionStruct::LegalMove(int mv) const {
     return FALSE;
   }
 
-  // 2. �ж�Ŀ����Ƿ����Լ�������
+  // 2. Destination must not hold own piece
   sqDst = DST(mv);
   pcDst = ucpcSquares[sqDst];
   if ((pcDst & pcSelfSide) != 0) {
     return FALSE;
   }
 
-  // 3. �������ӵ����ͼ���߷��Ƿ����
+  // 3. Piece-specific geometry
   switch (pcSrc - pcSelfSide) {
   case PIECE_KING:
     return IN_FORT(sqDst) && KING_SPAN(sqSrc, sqDst);
@@ -901,20 +891,20 @@ BOOL PositionStruct::LegalMove(int mv) const {
   }
 }
 
-// �ж��Ƿ񱻽���
+// Is side to move in check now
 BOOL PositionStruct::Checked() const {
   int i, j, sqSrc, sqDst;
   int pcSelfSide, pcOppSide, pcDst, nDelta;
   pcSelfSide = SIDE_TAG(sdPlayer);
   pcOppSide = OPP_SIDE_TAG(sdPlayer);
-  // �ҵ������ϵ�˧(��)�����������жϣ�
+  // Locate own king, then:
 
   for (sqSrc = 0; sqSrc < 256; sqSrc ++) {
     if (ucpcSquares[sqSrc] != pcSelfSide + PIECE_KING) {
       continue;
     }
 
-    // 1. �ж��Ƿ񱻶Է��ı�(��)����
+    // 1. Pawn checks
     if (ucpcSquares[SQUARE_FORWARD(sqSrc, sdPlayer)] == pcOppSide + PIECE_PAWN) {
       return TRUE;
     }
@@ -924,7 +914,7 @@ BOOL PositionStruct::Checked() const {
       }
     }
 
-    // 2. �ж��Ƿ񱻶Է��������(����(ʿ)�Ĳ�����������)
+    // 2. Knight checks (advisor delta as leg)
     for (i = 0; i < 4; i ++) {
       if (ucpcSquares[sqSrc + ccAdvisorDelta[i]] != 0) {
         continue;
@@ -937,7 +927,7 @@ BOOL PositionStruct::Checked() const {
       }
     }
 
-    // 3. �ж��Ƿ񱻶Է��ĳ����ڽ���(������˧����)
+    // 3. Rook/cannon/king-face checks
     for (i = 0; i < 4; i ++) {
       nDelta = ccKingDelta[i];
       sqDst = sqSrc + nDelta;
@@ -968,7 +958,7 @@ BOOL PositionStruct::Checked() const {
   return FALSE;
 }
 
-// �ж��Ƿ�ɱ
+// Is checkmate
 BOOL PositionStruct::IsMate(void) {
   int i, nGenMoveNum, pcCaptured;
   int mvs[MAX_GEN_MOVES];
@@ -986,7 +976,7 @@ BOOL PositionStruct::IsMate(void) {
   return TRUE;
 }
 
-// ����ظ�����
+// Detect repetition along move list
 int PositionStruct::RepStatus(int nRecur) const {
   BOOL bSelfSide, bPerpCheck, bOppPerpCheck;
   const MoveStruct *lpmvs;
@@ -1012,7 +1002,7 @@ int PositionStruct::RepStatus(int nRecur) const {
   return 0;
 }
 
-// �Ծ��澵��
+// Build horizontally mirrored copy
 void PositionStruct::Mirror(PositionStruct &posMirror) const {
   int sq, pc;
   posMirror.ClearBoard();

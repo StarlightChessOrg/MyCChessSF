@@ -199,7 +199,7 @@ struct XQWLEngine {
 };
 
 PYBIND11_MODULE(xqwlight_core, m) {
-  m.doc() = "象棋小巫师 XQWL06：局面规则 + Alpha-Beta 搜索（Linux .so / pybind11）";
+  m.doc() = "XQWL06 xiangqi: position rules + Alpha-Beta search (Linux .so via pybind11)";
 
   py::class_<XQWLPosition>(m, "Position")
       .def(py::init<>())

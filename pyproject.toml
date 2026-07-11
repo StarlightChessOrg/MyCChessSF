@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mycchess-sf"
 version = "0.1.0"
-description = "象棋小巫师 XQWL06：C++ 规则+搜索 .so、网页人机对弈"
+description = "XQWL06 xiangqi engine (.so) and web human-vs-wizard play"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

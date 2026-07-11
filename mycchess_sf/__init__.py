@@ -1,4 +1,4 @@
-"""MyCChessSF：象棋小巫师 XQWL06 规则 + 搜索，网页对弈。"""
+"""MyCChessSF: XQWL06 rules + search, web play."""
 
 __all__ = ["__version__"]
 

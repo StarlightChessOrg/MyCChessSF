@@ -1,4 +1,4 @@
-// XQWL06 搜索与开局库（自 Win32/XQWL06.CPP 移植；LoadBook 改为读文件）
+// XQWL06 search + opening book (ported from Win32/XQWL06.CPP; LoadBook reads a file)
 #ifndef XQWL_SEARCH_INC
 #define XQWL_SEARCH_INC
 
@@ -478,7 +478,7 @@ static void SearchMain(void) {
   }
 }
 
-/** 在 ``position`` 副本上搜索最佳着法；``tables`` 可跨局复用（开局库等）。 */
+/** Search best move on a copy of ``position``; ``tables`` holds TT/book across calls. */
 inline int XqwlSearchBestMove(PositionStruct &position, XqwlSearchTables &tables, int time_limit_ms,
                               bool use_book = true) {
   if (time_limit_ms < 50) {

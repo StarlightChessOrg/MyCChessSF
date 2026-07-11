@@ -1,4 +1,4 @@
-"""对弈会话：``xqwlight_core`` 规则。"""
+"""Game session alias over ``xqwlight_core`` rules."""
 
 from __future__ import annotations
 

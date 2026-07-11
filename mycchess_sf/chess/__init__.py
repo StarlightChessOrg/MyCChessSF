@@ -1,7 +1,5 @@
-"""对弈会话：``xqwlight_core`` 规则（见 ``mycchess_sf.xqwl_state``）。"""
+"""Chess session package."""
 
-from __future__ import annotations
+from mycchess_sf.chess.session import GamePlay
 
-from mycchess_sf.xqwl_state import XqwlGameState
-
-GamePlay = XqwlGameState
+__all__ = ["GamePlay"]

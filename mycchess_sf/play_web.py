@@ -1,4 +1,4 @@
-"""网页对弈（Sanic）；规则与 AI 均来自 ``xqwlight_core``（象棋小巫师 XQWL06）。"""
+"""Web play (Sanic): rules and AI from ``xqwlight_core`` (XQWL06)."""
 from __future__ import annotations
 
 import argparse

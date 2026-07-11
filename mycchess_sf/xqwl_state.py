@@ -1,4 +1,4 @@
-"""唯一规则后端：``xqwlight_core.Position`` + 从 FEN 派生的观测字段。"""
+"""Rule backend: ``xqwlight_core.Position`` plus FEN-derived board view."""
 from __future__ import annotations
 
 import numpy as np
@@ -6,6 +6,7 @@ import numpy as np
 from mycchess_sf.fen_parse import parse_fen_board
 from mycchess_sf.iccs_util import parse_move_squares
 
+# RepValue drawish branch magnitude; BAN_VALUE separates drawish vs ban-loss
 REP_RULE_VALUE_DRAWISH_ABS = 50
 
 
@@ -16,13 +17,12 @@ def _require_xqwlight():
         return _P
     except ImportError as e:
         raise ImportError(
-            "MyCChessSF 需要已编译的 ``xqwlight_core`` 扩展（见 README 的 CMake 说明）。"
-            "规则与搜索均来自象棋小巫师 XQWL06。"
+            "MyCChessSF requires a built ``xqwlight_core`` extension (see README / CMake)."
         ) from e
 
 
 class XqwlGameState:
-    """封装 ``xqwlight_core.Position``；``board_view`` 红方在下。"""
+    """Wraps ``xqwlight_core.Position``; ``board_view`` has red on the bottom row."""
 
     __slots__ = ("pos", "_last_move_iccs")
 
@@ -85,5 +85,5 @@ class XqwlGameState:
         return o
 
     def raw_position(self):
-        """底层 ``xqwlight_core.Position``，供 ``Engine.search_best_iccs`` 使用。"""
+        """Underlying ``xqwlight_core.Position`` for ``Engine.search_best_iccs``."""
         return self.pos
