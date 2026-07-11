@@ -240,21 +240,25 @@ int SortStruct::Next(void) {
     if (mvHash != 0) {
       return mvHash;
     }
+    [[fallthrough]];
   case PHASE_KILLER_1:
     nPhase = PHASE_KILLER_2;
     if (mvKiller1 != mvHash && mvKiller1 != 0 && XQWL_SEARCH_POS.LegalMove(mvKiller1)) {
       return mvKiller1;
     }
+    [[fallthrough]];
   case PHASE_KILLER_2:
     nPhase = PHASE_GEN_MOVES;
     if (mvKiller2 != mvHash && mvKiller2 != 0 && XQWL_SEARCH_POS.LegalMove(mvKiller2)) {
       return mvKiller2;
     }
+    [[fallthrough]];
   case PHASE_GEN_MOVES:
     nPhase = PHASE_REST;
     nGenMoves = XQWL_SEARCH_POS.GenerateMoves(mvs);
     qsort(mvs, static_cast<size_t>(nGenMoves), sizeof(int), CompareHistory);
     nIndex = 0;
+    [[fallthrough]];
   case PHASE_REST:
     while (nIndex < nGenMoves) {
       mv = mvs[nIndex];
@@ -263,6 +267,7 @@ int SortStruct::Next(void) {
         return mv;
       }
     }
+    [[fallthrough]];
   default:
     return 0;
   }
