@@ -64,6 +64,8 @@ mycchess-play-web --no-book-default        # 启动时默认不用开局库
 
 ## NNUE 训练数据生成（`xqwl_gen_nnue`）
 
+> 模型结构调研见 [docs/nnue_pikafish_research.md](docs/nnue_pikafish_research.md)（基于 Pikafish NNUE，含 SIMD 友好尺寸建议）。
+
 用于批量生成 **FEN + 搜索评分** 监督数据，供后续 NNUE 模型训练。
 
 ### 行为
