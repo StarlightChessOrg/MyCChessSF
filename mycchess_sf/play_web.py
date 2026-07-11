@@ -39,11 +39,11 @@ def _piece_side(ch: str | None) -> str | None:
 
 
 def _board_view_y_to_iccs_y(iy_view: int) -> int:
-    return 9 - iy_view
+    return iy_view
 
 
 def _iccs_y_to_board_view_y(iy_iccs: int) -> int:
-    return 9 - iy_iccs
+    return iy_iccs
 
 
 class XqwlWebSession:

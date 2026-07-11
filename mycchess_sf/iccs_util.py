@@ -2,8 +2,8 @@
 
 
 def iccs_y_to_board_view_row(y_iccs: int) -> int:
-    """ICCS engine y (0..9) -> ``board_view`` row (red at bottom)."""
-    return 9 - int(y_iccs)
+    """ICCS / engine y (0=black top .. 9=red bottom) equals ``board_view`` row."""
+    return int(y_iccs)
 
 
 def parse_move_squares(move: str) -> tuple[int, int, int, int]:
