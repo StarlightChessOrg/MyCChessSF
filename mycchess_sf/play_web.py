@@ -50,12 +50,26 @@ def _iccs_y_to_board_view_y(iy_iccs: int) -> int:
 
 
 class XqwlWebSession:
-    def __init__(self, engine, *, think_ms: int = 1000, book_available: bool = False) -> None:
+    def __init__(
+        self,
+        engine,
+        *,
+        think_ms: int = 1000,
+        book_available: bool = False,
+        book_path: str | None = None,
+        nnue_available: bool = False,
+        nnue_path: str | None = None,
+        use_nnue: bool = False,
+    ) -> None:
         self._lock = threading.Lock()
         self._engine = engine
         self._think_ms = max(50, int(think_ms))
         self._book_available = bool(book_available)
+        self._book_path = book_path or ""
         self._use_book = bool(book_available)
+        self._nnue_available = bool(nnue_available)
+        self._nnue_path = nnue_path or ""
+        self._use_nnue = bool(use_nnue) and self._nnue_available
         self.game = GamePlay()
         self.sel_from: tuple[int, int] | None = None
         self.last_move: tuple[int, int, int, int] | None = None
@@ -219,7 +233,12 @@ class XqwlWebSession:
                 "strategies": list(STRATEGIES),
                 "book_available": self._book_available,
                 "use_book": self._use_book,
+                "book_path": self._book_path,
                 "book_size": int(self._engine.book_size()) if self._book_available else 0,
+                "nnue_available": self._nnue_available,
+                "use_nnue": self._use_nnue,
+                "nnue_path": self._nnue_path,
+                "nnue_active": bool(self._engine.nnue_loaded()),
                 "status_text": f"轮到 {'红方' if side == 'red' else '黑方'} 走棋",
                 "ai_busy": self._ai_busy,
                 "ai_pending": self._ai_pending,
@@ -258,6 +277,24 @@ class XqwlWebSession:
             return None
         with self._lock:
             self._use_book = bool(enabled)
+        return None
+
+    def set_use_nnue(self, enabled: bool) -> dict | None:
+        if not self._nnue_available or not self._nnue_path:
+            if enabled:
+                return {"error": "未找到可用的 NNUE 权重文件"}
+            with self._lock:
+                self._use_nnue = False
+                self._engine.clear_nnue()
+            return None
+        with self._lock:
+            if enabled:
+                if not self._engine.load_nnue(self._nnue_path):
+                    return {"error": "NNUE 权重加载失败"}
+                self._use_nnue = True
+            else:
+                self._engine.clear_nnue()
+                self._use_nnue = False
         return None
 
     def new_game(self) -> dict | None:
@@ -347,7 +384,8 @@ class XqwlWebSession:
             try:
                 with self._lock:
                     mode = "开局库+搜索" if use_book else "纯搜索"
-                    self._ai_thinking = f"象棋小巫师思考中（{mode}，约 {think_ms} ms）…"
+                    eval_tag = "NNUE" if self._engine.nnue_loaded() else "PST"
+                    self._ai_thinking = f"象棋小巫师思考中（{eval_tag}·{mode}，约 {think_ms} ms）…"
                 t0 = time.perf_counter()
                 pos = g_copy.raw_position()
                 detail = dict(engine.search_best_detail(pos, think_ms, use_book))
@@ -377,6 +415,7 @@ class XqwlWebSession:
                         piece_ch=piece_ch,
                         iccs=mv,
                         from_book=bool(detail.get("from_book", False)),
+                        score=int(detail.get("score", 0)),
                     )
                     self._think_log.append(entry)
                     if len(self._think_log) > 200:
@@ -426,6 +465,14 @@ def _html_page() -> str:
     button{{margin-top:14px;cursor:pointer}}
     .check-row{{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px}}
     .check-row input{{width:16px;height:16px}}
+    .check-row.disabled-row,.check-row.disabled-row label{{color:#9a9080}}
+    .check-row.disabled-row input{{cursor:not-allowed;opacity:.65}}
+    .path-info{{margin-top:14px;padding-top:12px;border-top:1px solid #c9b89a;font-size:11px}}
+    .path-item{{margin-bottom:10px}}
+    .path-label{{display:block;color:#5c4a32;margin-bottom:3px;font-size:12px}}
+    .path-val{{display:block;font-family:Consolas,"Microsoft YaHei",monospace;line-height:1.45;
+      word-break:break-all;color:#3d2f1f}}
+    .path-val.missing{{color:#9a9080;font-style:italic}}
     .think-panel{{background:var(--panel);border:1px solid #b9a88d;padding:14px 16px;align-self:stretch}}
     .think-panel h2{{font-size:15px;margin:0 0 8px}}
     .think-panel .hint{{font-size:12px;color:#5c4a32;margin-bottom:10px}}
@@ -459,7 +506,7 @@ def _html_page() -> str:
     <div class="layout">
       <div class="think-panel">
         <h2>思考日志</h2>
-        <div class="hint">小巫师每步决策：深度、耗时、棋子与坐标</div>
+        <div class="hint">小巫师每步决策：深度、耗时、行棋方 vl、棋子与坐标</div>
         <div id="think-log-body"></div>
       </div>
       <div class="board-wrap">
@@ -476,6 +523,11 @@ def _html_page() -> str:
         <label>红方策略</label><select id="sel-red"></select>
         <label>黑方策略</label><select id="sel-black"></select>
         <div id="book-row" class="check-row"><label><input type="checkbox" id="chk-book" disabled/> 使用开局库 BOOK.DAT</label></div>
+        <div id="nnue-row" class="check-row disabled-row"><label><input type="checkbox" id="chk-nnue" disabled/> 小巫师使用 NNUE 评估</label></div>
+        <div class="path-info">
+          <div class="path-item"><span class="path-label">开局库路径</span><span id="book-path" class="path-val missing">—</span></div>
+          <div class="path-item"><span class="path-label">NNUE 权重路径</span><span id="nnue-path" class="path-val missing">—</span></div>
+        </div>
         <div class="check-row"><label><input type="checkbox" id="chk-sound" checked/> 音效</label></div>
         <button type="button" id="btn-new">新局</button>
         <button type="button" id="btn-flip">翻转棋盘</button>
@@ -500,6 +552,8 @@ def _html_page() -> str:
   const selRed=document.getElementById("sel-red"), selBlack=document.getElementById("sel-black");
   const btnNew=document.getElementById("btn-new"), btnFlip=document.getElementById("btn-flip");
   const chkBook=document.getElementById("chk-book"), bookRow=document.getElementById("book-row");
+  const chkNnue=document.getElementById("chk-nnue"), nnueRow=document.getElementById("nnue-row");
+  const bookPathEl=document.getElementById("book-path"), nnuePathEl=document.getElementById("nnue-path");
   const chkSound=document.getElementById("chk-sound");
   const aiThinkingEl=document.getElementById("ai-thinking"), thinkLogBody=document.getElementById("think-log-body");
   const dialogOverlay=document.getElementById("dialog-overlay"), dialogTitle=document.getElementById("dialog-title");
@@ -596,6 +650,16 @@ def _html_page() -> str:
     }});
     thinkLogBody.scrollTop=thinkLogBody.scrollHeight;
   }}
+  function setPathEl(el, path, missingText){{
+    if(!el)return;
+    if(path){{
+      el.textContent=path;
+      el.classList.remove("missing");
+    }}else{{
+      el.textContent=missingText||"（未找到）";
+      el.classList.add("missing");
+    }}
+  }}
   function isInputLocked(snap){{
     if(!snap)return true;
     if(typeof snap.input_locked==="boolean")return snap.input_locked;
@@ -610,7 +674,17 @@ def _html_page() -> str:
       var avail=!!snap.book_available;
       chkBook.disabled=!avail;
       if(avail)chkBook.checked=!!snap.use_book;
+      bookRow.classList.toggle("disabled-row",!avail);
     }}
+    setPathEl(bookPathEl,snap.book_path||"","（未加载开局库）");
+    if(chkNnue&&nnueRow){{
+      var nnueAvail=!!snap.nnue_available;
+      chkNnue.disabled=!nnueAvail;
+      if(nnueAvail)chkNnue.checked=!!snap.use_nnue;
+      else chkNnue.checked=false;
+      nnueRow.classList.toggle("disabled-row",!nnueAvail);
+    }}
+    setPathEl(nnuePathEl,snap.nnue_path||"","（未找到 NNUE 权重）");
     statusEl.textContent=snap.status_text||"";
     if(aiThinkingEl){{
       if(snap.ai_thinking)aiThinkingEl.textContent=snap.ai_thinking;
@@ -710,6 +784,13 @@ def _html_page() -> str:
         .then(function(j){{if(j.error)showAlert("开局库",j.error);else armPoll(20);}});
     }});
   }}
+  if(chkNnue){{
+    chkNnue.addEventListener("change",function(){{
+      fetch("/api/nnue",{{method:"POST",headers:{{"Content-Type":"application/json"}},
+        body:JSON.stringify({{enabled:chkNnue.checked}})}}).then(function(r){{return r.json();}})
+        .then(function(j){{if(j.error){{showAlert("NNUE",j.error);armPoll(20);}}else armPoll(20);}});
+    }});
+  }}
   onePoll();
 }})();
 </script>
@@ -729,6 +810,31 @@ def _default_book_path() -> Path | None:
         if p.is_file():
             return p
     return None
+
+
+def _default_nnue_path() -> Path | None:
+    root = Path(__file__).resolve().parent.parent
+    candidates = [
+        root / "nnue_qINT8" / "output" / "quantized.xqnnue.bin",
+        root / "deployment" / "nnue" / "quantized.xqnnue.bin",
+        Path.cwd() / "nnue_qINT8" / "output" / "quantized.xqnnue.bin",
+        Path.cwd() / "deployment" / "nnue" / "quantized.xqnnue.bin",
+        root / "quantized.xqnnue.bin",
+        Path.cwd() / "quantized.xqnnue.bin",
+    ]
+    for p in candidates:
+        if p.is_file():
+            return p
+    return None
+
+
+def _resolve_path_str(path: Path | None) -> str:
+    if path is None:
+        return ""
+    try:
+        return str(path.resolve())
+    except OSError:
+        return str(path)
 
 
 def main() -> None:
@@ -751,22 +857,55 @@ def main() -> None:
     p.add_argument("--think-ms", type=int, default=1000, help="小巫师每步思考时间（毫秒）")
     p.add_argument("--book", type=Path, default=None, help="开局库 BOOK.DAT（默认 deployment/db/BOOK.DAT）")
     p.add_argument("--no-book-default", action="store_true", help="启动时默认关闭开局库")
+    p.add_argument("--nnue", type=Path, default=None, help="NNUE 权重 .xqnnue.bin（默认自动检测）")
+    p.add_argument("--no-nnue-default", action="store_true", help="启动时默认关闭 NNUE（仍显示路径）")
     args = p.parse_args()
 
     engine = Engine()
     book = args.book if args.book is not None else _default_book_path()
     book_available = False
+    book_path_str = ""
     if book is not None and book.is_file():
         engine.load_book(str(book))
         book_available = engine.book_size() > 0
-        print(f"[play] 已加载开局库: {book} ({engine.book_size()} 项)", flush=True)
+        book_path_str = _resolve_path_str(book)
+        print(f"[play] 已加载开局库: {book_path_str} ({engine.book_size()} 项)", flush=True)
     else:
-        print("[play] 未找到 BOOK.DAT", flush=True)
+        if args.book is not None:
+            book_path_str = _resolve_path_str(args.book)
+            print(f"[play] 开局库文件不存在: {book_path_str}", flush=True)
+        else:
+            print("[play] 未找到 BOOK.DAT", flush=True)
+
+    nnue = args.nnue if args.nnue is not None else _default_nnue_path()
+    nnue_path_str = _resolve_path_str(nnue) if nnue is not None and nnue.is_file() else ""
+    if args.nnue is not None and not nnue_path_str:
+        nnue_path_str = _resolve_path_str(args.nnue)
+    nnue_available = False
+    use_nnue = False
+    if nnue_path_str:
+        if engine.load_nnue(nnue_path_str):
+            nnue_available = True
+            use_nnue = not args.no_nnue_default
+            if not use_nnue:
+                engine.clear_nnue()
+            print(f"[play] NNUE 可用: {nnue_path_str}", flush=True)
+        else:
+            print(f"[play] NNUE 文件存在但加载失败: {nnue_path_str}", flush=True)
+    else:
+        if args.nnue is not None:
+            print(f"[play] NNUE 文件不存在: {_resolve_path_str(args.nnue)}", flush=True)
+        else:
+            print("[play] 未找到 NNUE 权重", flush=True)
 
     session = XqwlWebSession(
         engine,
         think_ms=int(args.think_ms),
         book_available=book_available,
+        book_path=book_path_str,
+        nnue_available=nnue_available,
+        nnue_path=nnue_path_str,
+        use_nnue=use_nnue,
     )
     session.set_use_book(book_available and not args.no_book_default)
 
@@ -826,6 +965,17 @@ def main() -> None:
         if not isinstance(enabled, bool):
             return json({"error": "enabled 须为布尔值"}, status=400)
         err = session.set_use_book(enabled)
+        return json(err or {})
+
+    @app.post("/api/nnue")
+    async def _api_nnue(request):
+        data = request.json
+        if not isinstance(data, dict):
+            return json({"error": "参数无效"}, status=400)
+        enabled = data.get("enabled")
+        if not isinstance(enabled, bool):
+            return json({"error": "enabled 须为布尔值"}, status=400)
+        err = session.set_use_nnue(enabled)
         return json(err or {})
 
     @app.after_server_start
