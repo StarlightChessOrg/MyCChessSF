@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare C++ NNUE eval (xqwlight_core) vs Python QuantizedNNUE."""
+"""Compare C++ INT8 NNUE eval vs Python QuantizedNNUE (float + int8 paths)."""
 from __future__ import annotations
 
 import sys
@@ -22,11 +22,19 @@ from features.xqwl_psq import fen_to_feature_indices
 from int8_nnue import QuantizedNNUE
 
 
-def py_nnue_vl(model: QuantizedNNUE, fen: str) -> float:
+def py_indices(fen: str) -> tuple[torch.Tensor, torch.Tensor]:
     idx = fen_to_feature_indices(fen)
-    indices = torch.tensor(idx, dtype=torch.long)
-    offsets = torch.tensor([0], dtype=torch.long)
+    return torch.tensor(idx, dtype=torch.long), torch.tensor([0], dtype=torch.long)
+
+
+def py_nnue_vl_float(model: QuantizedNNUE, fen: str) -> float:
+    indices, offsets = py_indices(fen)
     return float(model.forward_vl(indices, offsets).item())
+
+
+def py_nnue_vl_int8(model: QuantizedNNUE, fen: str) -> float:
+    indices, offsets = py_indices(fen)
+    return float(model.forward_vl_int8(indices, offsets).item())
 
 
 def load_samples(path: Path, n: int) -> list[tuple[str, float]]:
@@ -46,54 +54,88 @@ def main() -> None:
     pt_path = QINT8 / "output" / "quantized.xqint8.pt"
     data_path = ROOT / "nnue_data" / "worker_0.txt"
 
+    if not pt_path.is_file():
+        print(f"Missing quantized checkpoint: {pt_path}")
+        print("Run: cd nnue_qINT8 && python3 quantize.py")
+        sys.exit(1)
+    if not bin_path.is_file():
+        print(f"Missing binary: {bin_path}")
+        sys.exit(1)
+
     py_model = QuantizedNNUE.load(str(pt_path))
+    if py_model.fc0.input_scale <= 0.0:
+        print("ERROR: FC input_scale unset in checkpoint; re-run quantize.py")
+        sys.exit(1)
+
     engine = xc.Engine()
     if not engine.load_nnue(str(bin_path)):
         print("load_nnue failed")
         sys.exit(1)
 
+    print(f"[simd] C++ backend={engine.nnue_simd_backend()}")
+    print(
+        f"[scales] fc0={py_model.fc0.input_scale:.6g}  "
+        f"fc1={py_model.fc1.input_scale:.6g}  fc2={py_model.fc2.input_scale:.6g}"
+    )
+
     pos = xc.Position()
-    py_vl = py_nnue_vl(py_model, pos.fen())
+    fen0 = pos.fen()
+    py_f = py_nnue_vl_float(py_model, fen0)
+    py_i = py_nnue_vl_int8(py_model, fen0)
     cpp_vl = engine.evaluate_nnue_raw(pos)
-    print("[startpos]")
-    print(f"  PST={pos.evaluate()}  C++ raw={cpp_vl}  Py NNUE={py_vl:.2f}  |diff|={abs(cpp_vl - py_vl):.2f}")
     inc_drift = engine.verify_nnue_incremental(pos)
-    print(f"  incremental drift (root+1ply): {inc_drift}")
+    print("[startpos]")
+    print(f"  PST={pos.evaluate()}  C++={cpp_vl}  PyFloat={py_f:.2f}  PyInt8={py_i:.2f}")
+    print(f"  |C++-PyFloat|={abs(cpp_vl - py_f):.2f}  |C++-PyInt8|={abs(cpp_vl - py_i):.2f}")
+    print(f"  |PyFloat-PyInt8|={abs(py_f - py_i):.2f}  incremental_drift={inc_drift}")
 
     samples = load_samples(data_path, 500)
-    diffs: list[float] = []
-    max_diff = 0.0
-    worst = ""
+    diff_float: list[float] = []
+    diff_int8: list[float] = []
+    diff_py_paths: list[float] = []
     skipped = 0
+    worst = ""
+    max_df = 0.0
+
     for fen, _vl in samples:
         if not pos.set_fen(fen):
             skipped += 1
             continue
         cpp = engine.evaluate_nnue_raw(pos)
-        py = py_nnue_vl(py_model, fen)
-        d = abs(cpp - py)
-        diffs.append(d)
-        if d > max_diff:
-            max_diff = d
+        pf = py_nnue_vl_float(py_model, fen)
+        pi = py_nnue_vl_int8(py_model, fen)
+        df = abs(cpp - pf)
+        di = abs(cpp - pi)
+        dp = abs(pf - pi)
+        diff_float.append(df)
+        diff_int8.append(di)
+        diff_py_paths.append(dp)
+        if df > max_df:
+            max_df = df
             worst = fen
 
-    diffs_arr = np.array(diffs, dtype=np.float64)
-    print(f"\n[compare] n={len(diffs)} skipped={skipped}")
-    print(f"  |diff| mean={diffs_arr.mean():.3f}  max={diffs_arr.max():.3f}  p99={np.percentile(diffs_arr, 99):.3f}")
-    print(f"  within 1.0: {(diffs_arr <= 1.0).mean() * 100:.1f}%")
-    print(f"  within 5.0: {(diffs_arr <= 5.0).mean() * 100:.1f}%")
+    arr_f = np.array(diff_float, dtype=np.float64)
+    arr_i = np.array(diff_int8, dtype=np.float64)
+    arr_p = np.array(diff_py_paths, dtype=np.float64)
+    print(f"\n[compare] n={len(arr_f)} skipped={skipped}")
+    print(f"  C++ vs PyFloat: mean={arr_f.mean():.3f} max={arr_f.max():.3f} p99={np.percentile(arr_f, 99):.3f}")
+    print(f"  C++ vs PyInt8:  mean={arr_i.mean():.3f} max={arr_i.max():.3f} p99={np.percentile(arr_i, 99):.3f}")
+    print(f"  PyFloat vs Int8: mean={arr_p.mean():.3f} max={arr_p.max():.3f}")
+    print(f"  C++ within 1.0 of PyFloat: {(arr_f <= 1.0).mean() * 100:.1f}%")
+    print(f"  C++ within 1.0 of PyInt8:  {(arr_i <= 1.0).mean() * 100:.1f}%")
     if worst:
         print(f"  worst fen: {worst[:60]}...")
 
     detail = engine.search_best_detail(pos, 200, False)
     print(f"\n[search+nnue] iccs={detail['iccs']!r} depth={detail['depth']} score={detail['score']}")
 
-    engine.clear_nnue()
-    detail2 = engine.search_best_detail(pos, 200, False)
-    print(f"[search+pst] iccs={detail2['iccs']!r} depth={detail2['depth']} score={detail2['score']}")
-
-    ok = diffs_arr.max() <= 5.0 and abs(cpp_vl - py_vl) <= 1.0 and inc_drift == 0
-    print(f"\n{'PASS' if ok else 'CHECK'}: C++ NNUE matches Python reference")
+    ok = (
+        arr_i.max() <= 1.0
+        and abs(cpp_vl - py_i) <= 1.0
+        and inc_drift == 0
+        and arr_p.max() <= 200.0
+    )
+    print(f"\n{'PASS' if ok else 'CHECK'}: C++ INT8 NNUE matches Python int8 reference")
     sys.exit(0 if ok else 1)
 
 

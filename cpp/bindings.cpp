@@ -253,6 +253,13 @@ struct XQWLEngine {
     return nnue.verify_incremental(position.board);
   }
 
+  std::string nnue_simd_backend() const {
+    if (!nnue.loaded) {
+      return "none";
+    }
+    return xqwl_nnue::simd::backend_name();
+  }
+
   int evaluate_static(const XQWLPosition &position) const { return position.board.Evaluate(); }
 
   std::string search_best_iccs(const XQWLPosition &position, int time_ms = 1000, bool use_book = true) {
@@ -318,6 +325,7 @@ PYBIND11_MODULE(xqwlight_core, m) {
       .def("evaluate_nnue", &XQWLEngine::evaluate_nnue, py::arg("position"))
       .def("evaluate_nnue_raw", &XQWLEngine::evaluate_nnue_raw, py::arg("position"))
       .def("verify_nnue_incremental", &XQWLEngine::verify_nnue_incremental, py::arg("position"))
+      .def("nnue_simd_backend", &XQWLEngine::nnue_simd_backend)
       .def("search_best_iccs", &XQWLEngine::search_best_iccs, py::arg("position"), py::arg("time_ms") = 1000,
            py::arg("use_book") = true)
       .def("search_best_mv", &XQWLEngine::search_best_mv, py::arg("position"), py::arg("time_ms") = 1000,

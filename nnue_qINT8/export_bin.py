@@ -16,13 +16,16 @@ if str(ROOT) not in sys.path:
 from int8_nnue import QuantizedNNUE
 
 _MAGIC = b"XQNNUE01"
-_VERSION = 1
+_VERSION = 2
 
 
 def export_bin(model: QuantizedNNUE, path: Path) -> None:
     m = model
+    if m.fc0.input_scale <= 0.0 or m.fc1.input_scale <= 0.0 or m.fc2.input_scale <= 0.0:
+        raise ValueError("FC input_scale unset; run calibrate_fc_input_scales() before export")
+
     header = struct.pack(
-        "<8sIddIIIIff",
+        "<8sIddIIIIfffff",
         _MAGIC,
         _VERSION,
         m.label_mean,
@@ -33,6 +36,9 @@ def export_bin(model: QuantizedNNUE, path: Path) -> None:
         m.l3,
         float(m.ft_clip),
         float(m.act_clip),
+        float(m.fc0.input_scale),
+        float(m.fc1.input_scale),
+        float(m.fc2.input_scale),
     )
 
     def _write_tensor(f, t: torch.Tensor, dtype_code: str) -> None:
@@ -84,7 +90,10 @@ def main() -> None:
 
     model = QuantizedNNUE.load(str(args.input))
     export_bin(model, args.output)
-    print(f"[export] {args.input} -> {args.output}  ({args.output.stat().st_size:,} bytes)")
+    print(
+        f"[export] {args.input} -> {args.output}  ({args.output.stat().st_size:,} bytes)  "
+        f"in_scales=({model.fc0.input_scale:.6g}, {model.fc1.input_scale:.6g}, {model.fc2.input_scale:.6g})"
+    )
 
 
 if __name__ == "__main__":

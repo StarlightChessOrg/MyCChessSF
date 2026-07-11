@@ -18,7 +18,7 @@ for p in (ROOT, TRAINING_ROOT, REPO_ROOT):
 
 from data.dataset import NnueDataset, load_samples, make_dataloader
 from evaluate import evaluate_models
-from int8_nnue import QuantizedNNUE, quantize_float_nnue
+from int8_nnue import QuantizedNNUE, calibrate_fc_input_scales, quantize_float_nnue
 from model.nnue import NNUE
 
 
@@ -179,6 +179,9 @@ def main() -> None:
     quant_model.label_mean = label_mean
     quant_model.label_std = label_std
 
+    fc0_s, fc1_s, fc2_s = calibrate_fc_input_scales(quant_model, calib_loader, device)
+    print(f"[calibrate] fc input_scales: fc0={fc0_s:.6g}  fc1={fc1_s:.6g}  fc2={fc2_s:.6g}")
+
     ft_bytes = quant_model.ft.weight_int8.numel()
     fc_bytes = (
         quant_model.fc0.weight_int8.numel()
@@ -203,7 +206,7 @@ def main() -> None:
     quant_model.save(str(output_path))
     print(f"[saved] {output_path}")
 
-    bin_path = output_path.parent / f"{output_path.stem}.xqnnue.bin"
+    bin_path = output_path.parent / "quantized.xqnnue.bin"
     from export_bin import export_bin
 
     export_bin(quant_model, bin_path)

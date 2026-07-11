@@ -116,6 +116,11 @@ struct Weights {
   std::vector<std::int8_t> fc2_w;
   std::vector<std::int32_t> fc2_b;
   std::vector<float> fc2_scales;
+
+  float fc0_input_scale = 1.f;
+  float fc1_input_scale = 1.f;
+  float fc2_input_scale = 1.f;
+  std::uint32_t format_version = 1;
 };
 
 struct AccDelta {
@@ -178,11 +183,19 @@ struct Runtime {
     float act_clip = 1.f;
 
     bool ok = read_exact(f, magic, 8) && std::memcmp(magic, "XQNNUE01", 8) == 0 &&
-              read_exact(f, &version, sizeof(version)) && version == 1 &&
+              read_exact(f, &version, sizeof(version)) && (version == 1 || version == 2) &&
               read_exact(f, &label_mean, sizeof(label_mean)) && read_exact(f, &label_std, sizeof(label_std)) &&
               read_exact(f, &n_features, sizeof(n_features)) && read_exact(f, &l1, sizeof(l1)) &&
               read_exact(f, &l2, sizeof(l2)) && read_exact(f, &l3, sizeof(l3)) &&
               read_exact(f, &ft_clip, sizeof(ft_clip)) && read_exact(f, &act_clip, sizeof(act_clip));
+
+    float fc0_in = 0.f;
+    float fc1_in = 0.f;
+    float fc2_in = 0.f;
+    if (ok && version >= 2) {
+      ok = read_exact(f, &fc0_in, sizeof(fc0_in)) && read_exact(f, &fc1_in, sizeof(fc1_in)) &&
+           read_exact(f, &fc2_in, sizeof(fc2_in));
+    }
 
     if (!ok || n_features != static_cast<std::uint32_t>(kFeatures) || l1 == 0 || l2 == 0 || l3 == 0 ||
         l1 > static_cast<std::uint32_t>(kMaxL1)) {
@@ -199,6 +212,16 @@ struct Runtime {
     nw.act_clip = act_clip;
     nw.label_mean = label_mean;
     nw.label_std = label_std;
+    nw.format_version = version;
+    if (version >= 2) {
+      nw.fc0_input_scale = fc0_in;
+      nw.fc1_input_scale = fc1_in;
+      nw.fc2_input_scale = fc2_in;
+    } else {
+      nw.fc0_input_scale = std::max((ft_clip * ft_clip / 512.f) / 127.f, 1e-6f);
+      nw.fc1_input_scale = std::max(act_clip / 127.f, 1e-6f);
+      nw.fc2_input_scale = std::max(act_clip / 127.f, 1e-6f);
+    }
 
     ok = read_tensor_i8(f, nw.ft_w, static_cast<size_t>(nw.n_features) * static_cast<size_t>(nw.l1)) &&
          read_tensor_i32(f, nw.ft_b, static_cast<size_t>(nw.l1)) &&
@@ -318,12 +341,32 @@ struct Runtime {
     return sq > max_val ? max_val : sq;
   }
 
-  void fc_forward_float(const std::int8_t *w, const std::int32_t *bias, const float *scales, int out_dim,
-                        int in_dim, const float *in, float *out) const {
+  static std::uint8_t quantize_input(float v, float input_scale) {
+    if (v <= 0.f || input_scale <= 0.f) {
+      return 0;
+    }
+    const int q = static_cast<int>(std::lround(v / input_scale));
+    if (q >= 127) {
+      return 127;
+    }
+    return static_cast<std::uint8_t>(q);
+  }
+
+  void quantize_inputs(const float *in, int dim, float input_scale, std::uint8_t *out) const {
+    for (int i = 0; i < dim; ++i) {
+      out[i] = quantize_input(in[i], input_scale);
+    }
+  }
+
+  void fc_forward_int8(const std::int8_t *w, const std::int32_t *bias, const float *scales, int out_dim, int in_dim,
+                       const float *in, float input_scale, float *out) const {
+    std::uint8_t in_q[kMaxL1];
+    quantize_inputs(in, in_dim, input_scale, in_q);
     for (int o = 0; o < out_dim; ++o) {
       const std::int8_t *row = w + static_cast<size_t>(o) * static_cast<size_t>(in_dim);
+      const int32_t dot = simd::dot_i8_u8(row, in_q, in_dim);
       const float scale = scales[o];
-      out[o] = simd::fc_row_i8_f32(row, in, in_dim, static_cast<float>(bias[o]) * scale, scale);
+      out[o] = scale * static_cast<float>(bias[o]) + scale * static_cast<float>(dot) * input_scale;
     }
   }
 
@@ -350,7 +393,7 @@ struct Runtime {
 
     float x0[64];
     float x0_cat[128];
-    fc_forward_float(w.fc0_w.data(), w.fc0_b.data(), w.fc0_scales.data(), l2, l1, h, x0);
+    fc_forward_int8(w.fc0_w.data(), w.fc0_b.data(), w.fc0_scales.data(), l2, l1, h, w.fc0_input_scale, x0);
     for (int i = 0; i < l2; ++i) {
       x0_cat[i] = sq_clipped_relu(x0[i], w.act_clip);
       x0_cat[l2 + i] = clipped_relu(x0[i], w.act_clip);
@@ -358,14 +401,14 @@ struct Runtime {
 
     float x1[64];
     float x1_cat[128];
-    fc_forward_float(w.fc1_w.data(), w.fc1_b.data(), w.fc1_scales.data(), l3, l2 * 2, x0_cat, x1);
+    fc_forward_int8(w.fc1_w.data(), w.fc1_b.data(), w.fc1_scales.data(), l3, l2 * 2, x0_cat, w.fc1_input_scale, x1);
     for (int i = 0; i < l3; ++i) {
       x1_cat[i] = sq_clipped_relu(x1[i], w.act_clip);
       x1_cat[l3 + i] = clipped_relu(x1[i], w.act_clip);
     }
 
     float x2[1];
-    fc_forward_float(w.fc2_w.data(), w.fc2_b.data(), w.fc2_scales.data(), 1, l3 * 2, x1_cat, x2);
+    fc_forward_int8(w.fc2_w.data(), w.fc2_b.data(), w.fc2_scales.data(), 1, l3 * 2, x1_cat, w.fc2_input_scale, x2);
     return x2[0];
   }
 

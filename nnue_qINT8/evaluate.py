@@ -32,7 +32,7 @@ def evaluate_models(
         targets_raw = targets_raw.to(device)
 
         pred_float_norm = float_model(indices, offsets)
-        pred_int8_norm = quant_model.forward_norm(indices, offsets)
+        pred_int8_norm = quant_model.forward_norm_int8(indices, offsets)
 
         _update_metrics(metrics["float"], pred_float_norm, targets_norm, targets_raw, label_mean, label_std)
         _update_metrics(metrics["int8"], pred_int8_norm, targets_norm, targets_raw, label_mean, label_std)
