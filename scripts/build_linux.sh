@@ -6,6 +6,7 @@ PYTHON="${PYTHON:-$(command -v python3)}"
 CXXOPT="${CXXOPT:--O3}"
 DEPLOY="$ROOT/deployment"
 DEPLOY_BIN="$DEPLOY/bin"
+DEPLOY_LIB="$DEPLOY/lib"
 DEPLOY_DB="$DEPLOY/db"
 
 echo "[build] Python: $PYTHON"
@@ -50,8 +51,8 @@ fi
 
 echo "[build] Packing deployment/ ..."
 rm -rf "$DEPLOY"
-mkdir -p "$DEPLOY_BIN" "$DEPLOY_DB"
-cp -f "$ROOT/$SO_NAME" "$DEPLOY_BIN/"
+mkdir -p "$DEPLOY_BIN" "$DEPLOY_LIB" "$DEPLOY_DB"
+cp -f "$ROOT/$SO_NAME" "$DEPLOY_LIB/"
 if [[ -n "$GEN_NAME" ]]; then
   cp -f "$ROOT/$GEN_NAME" "$DEPLOY_BIN/"
   chmod +x "$DEPLOY_BIN/$GEN_NAME"
@@ -66,9 +67,12 @@ cp -f scripts/deployment_README.md "$DEPLOY/README.md"
 "$PYTHON" -m pip install -q -e .
 echo "[build] Done."
 echo "[build] Deployment: $DEPLOY"
-echo "[build]   bin/  -> xqwlight_core + xqwl_gen_nnue"
+echo "[build]   lib/  -> $SO_NAME (Python 扩展)"
+if [[ -n "$GEN_NAME" ]]; then
+  echo "[build]   bin/  -> $GEN_NAME"
+fi
 echo "[build]   db/   -> BOOK.DAT"
-echo "[build] Run web: mycchess-play-web --book $DEPLOY_DB/BOOK.DAT"
+echo "[build] Run web: PYTHONPATH=$DEPLOY_LIB mycchess-play-web --book $DEPLOY_DB/BOOK.DAT"
 if [[ -n "$GEN_NAME" ]]; then
   echo "[build] NNUE data gen: $DEPLOY_BIN/xqwl_gen_nnue --output-dir nnue_data"
 fi
