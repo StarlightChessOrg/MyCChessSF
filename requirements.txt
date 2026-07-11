@@ -1,0 +1,4 @@
+numpy>=1.24
+sanic>=23.12
+
+# C++ 扩展 xqwlight_core 需本地 CMake 编译，见 README
