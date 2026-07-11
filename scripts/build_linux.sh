@@ -3,8 +3,11 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PYTHON="${PYTHON:-$(command -v python3)}"
+# C++ optimization flag for xqwlight_core (override: CXXOPT=-O2 bash scripts/build_linux.sh)
+CXXOPT="${CXXOPT:--O3}"
 
 echo "[build] Python: $PYTHON"
+echo "[build] CXXOPT: $CXXOPT"
 "$PYTHON" -m pip install -q -U pip
 "$PYTHON" -m pip install -q pybind11 numpy pillow
 # pybind11 CMake config must match the same interpreter used for the extension
@@ -17,7 +20,7 @@ cd "$ROOT/cpp"
 rm -rf build
 mkdir -p build
 cd build
-cmake .. -DPython_EXECUTABLE="$PYTHON"
+cmake .. -DPython_EXECUTABLE="$PYTHON" -DCMAKE_CXX_FLAGS="$CXXOPT"
 cmake --build . -j"$(nproc 2>/dev/null || echo 2)"
 SO="$(find . -maxdepth 1 -name 'xqwlight_core*.so' | head -1)"
 if [[ -z "$SO" ]]; then

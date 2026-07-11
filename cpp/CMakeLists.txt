@@ -70,6 +70,6 @@ endif()
 pybind11_add_module(xqwlight_core MODULE bindings.cpp)
 
 target_include_directories(xqwlight_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-target_compile_options(xqwlight_core PRIVATE -O3 -Wall -Wextra -Wno-sign-compare -fPIC)
+target_compile_options(xqwlight_core PRIVATE -Wall -Wextra -Wno-sign-compare -fPIC)
 
 install(TARGETS xqwlight_core LIBRARY DESTINATION .)
