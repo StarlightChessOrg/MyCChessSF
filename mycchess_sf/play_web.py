@@ -238,6 +238,7 @@ class XqwlWebSession:
         return None
 
     def click_cell(self, ix: int, iy: int) -> dict | None:
+        """Handle a click; ``iy`` is board_view row (0=black top, 9=red bottom)."""
         with self._lock:
             if self._ai_busy:
                 return {"error": "小巫师思考中"}
@@ -250,12 +251,12 @@ class XqwlWebSession:
             if self.game.terminal()[0]:
                 return {"error": "对局已结束"}
             arr = self._raw_board()
-            vy = _iccs_y_to_board_view_y(iy)
+            vy = iy
             ch = arr[vy, ix]
             pc_side = _piece_side(str(ch) if ch else None)
 
             if pc_side == side:
-                self.sel_from = (ix, _iccs_y_to_board_view_y(iy))
+                self.sel_from = (ix, vy)
                 self._queue_sound("click")
                 return None
 
@@ -263,7 +264,8 @@ class XqwlWebSession:
                 return None
 
             fx, fy = self.sel_from
-            y1e, y2e = _board_view_y_to_iccs_y(fy), iy
+            y1e = _board_view_y_to_iccs_y(fy)
+            y2e = _board_view_y_to_iccs_y(iy)
             mv = f"{fx}{y1e}-{ix}{y2e}"
             pos = self.game.pos
             game_over = False
@@ -277,7 +279,7 @@ class XqwlWebSession:
                 return None
             else:
                 if pc_side == side:
-                    self.sel_from = (ix, _iccs_y_to_board_view_y(iy))
+                    self.sel_from = (ix, vy)
                     self._queue_sound("click")
                 return None
 
@@ -495,7 +497,7 @@ def _html_page() -> str:
     var ix=Math.floor((px-EDGE)/SQ);
     var iyVis=Math.floor((py-EDGE)/SQ);
     if(ix<0||ix>8||iyVis<0||iyVis>9)return null;
-    return {{ix:ix, iy:srvY(iyVis)}};
+    return {{ix:ix, iy:srvY(iyVis)}};  // board_view row for server
   }}
   boardEl.addEventListener("click",function(ev){{
     if(shell.classList.contains("ai-busy"))return;
