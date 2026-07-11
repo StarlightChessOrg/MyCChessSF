@@ -20,7 +20,9 @@
 
 namespace {
 
-constexpr int kIoBufferBytes = 1 << 20;
+constexpr int kIoBufferBytes = 8192;
+constexpr long long kFlushEveryPositions = 500;
+constexpr long long kProgressEveryPositions = 10000;
 constexpr long long kDefaultMaxPositions = 10'000'000LL;
 
 struct GenConfig {
@@ -166,7 +168,7 @@ void worker_main(int worker_id, long long quota, const GenConfig &cfg) {
     std::exit(1);
   }
   std::vector<char> io_buf(kIoBufferBytes);
-  setvbuf(fp, io_buf.data(), _IOFBF, io_buf.size());
+  setvbuf(fp, io_buf.data(), _IOLBF, io_buf.size());
   std::fprintf(stderr, "[worker %d] started -> %s (quota %lld)\n", worker_id, out_path.c_str(),
                static_cast<long long>(quota));
   std::fflush(stderr);
@@ -187,6 +189,14 @@ void worker_main(int worker_id, long long quota, const GenConfig &cfg) {
 
       std::fprintf(fp, "%s\t%d\n", fen.c_str(), search.score);
       ++written;
+      if (written % kFlushEveryPositions == 0) {
+        std::fflush(fp);
+      }
+      if (written % kProgressEveryPositions == 0) {
+        std::fprintf(stderr, "[worker %d] progress %lld / %lld\n", worker_id,
+                     static_cast<long long>(written), static_cast<long long>(quota));
+        std::fflush(stderr);
+      }
       if (written >= quota)
         break;
 
