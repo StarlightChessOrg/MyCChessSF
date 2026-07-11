@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include <vector>
 
+#define XQWL_NO_BOOK_LOADER
 #include "xqwl_portable_prefix.h"
 #include "xqwl_portable.cpp"
 #include "xqwl_fen.inc"

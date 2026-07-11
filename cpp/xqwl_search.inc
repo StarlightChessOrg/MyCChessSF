@@ -46,6 +46,7 @@ inline XqwlSearchTables &xqwl_tab() { return *g_xqwl_sc->tab; }
 #define XQWL_SEARCH_POS (xqwl_pos())
 #define XQWL_SEARCH_TAB (xqwl_tab())
 
+#ifndef XQWL_NO_BOOK_LOADER
 static void XqwlLoadBookFromFile(const char *path, XqwlSearchTables &srch) {
   srch.nBookSize = 0;
   if (path == nullptr || path[0] == '\0') {
@@ -76,6 +77,7 @@ static void XqwlLoadBookFromFile(const char *path, XqwlSearchTables &srch) {
   }
   std::fclose(f);
 }
+#endif // XQWL_NO_BOOK_LOADER
 
 static int CompareBook(const void *lpbk1, const void *lpbk2) {
   return static_cast<int>(static_cast<const BookItem *>(lpbk1)->dwLock -
