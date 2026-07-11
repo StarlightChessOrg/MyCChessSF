@@ -21,7 +21,7 @@
 
 namespace {
 
-constexpr int kIoBufferBytes = 8192;
+constexpr int kIoBufferBytes = 256 * 1024;
 constexpr long long kProgressEveryPositions = 10000;
 constexpr long long kDefaultMaxPositions = 10'000'000LL;
 
@@ -231,15 +231,17 @@ int terminal_kind(PositionStruct &pos) {
   return 0;
 }
 
-int collect_legal_moves(const PositionStruct &pos, int *out, int cap) {
+int collect_legal_moves(PositionStruct &pos, int *out, int cap) {
   int mvs[MAX_GEN_MOVES];
   const int n = pos.GenerateMoves(mvs, FALSE);
   int nLegal = 0;
   const int limit = n < cap ? n : cap;
   for (int i = 0; i < limit; ++i) {
-    PositionStruct trial = pos;
-    if (trial.MakeMove(mvs[i]) && nLegal < cap) {
-      out[nLegal++] = mvs[i];
+    if (pos.MakeMove(mvs[i])) {
+      pos.UndoMakeMove();
+      if (nLegal < cap) {
+        out[nLegal++] = mvs[i];
+      }
     }
   }
   return nLegal;
@@ -264,7 +266,8 @@ void worker_main(int worker_id, long long quota, const GenConfig &cfg) {
     std::exit(1);
   }
   std::vector<char> io_buf(kIoBufferBytes);
-  setvbuf(fp, io_buf.data(), _IOLBF, io_buf.size());
+  // Full buffering: _IOLBF would flush on every "FEN\\tscore\\n" and slow down as files grow.
+  setvbuf(fp, io_buf.data(), _IOFBF, io_buf.size());
   std::fprintf(stderr, "[worker %d] started -> %s (quota %lld)\n", worker_id, out_path.c_str(),
                static_cast<long long>(quota));
   std::fflush(stderr);
@@ -302,9 +305,9 @@ void worker_main(int worker_id, long long quota, const GenConfig &cfg) {
           XqwlSearchBestMoveEx(search_pos, *tab, cfg.think_ms, /*use_book=*/false);
 
       std::fprintf(fp, "%s\t%d\n", fen.c_str(), search.score);
-      std::fflush(fp);
       ++written;
       if (written % kProgressEveryPositions == 0) {
+        std::fflush(fp);
         std::fprintf(stderr, "[worker %d] progress %lld / %lld\n", worker_id,
                      static_cast<long long>(written), static_cast<long long>(quota));
         std::fflush(stderr);

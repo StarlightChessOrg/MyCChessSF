@@ -5,7 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <ctime>
+#include <chrono>
 #include <vector>
 
 struct HashItem {
@@ -46,7 +46,7 @@ struct XqwlSearchCtx {
   PositionStruct *pos;
   XqwlSearchTables *tab;
   int time_limit_ms;
-  clock_t t_start;
+  std::chrono::steady_clock::time_point t_start;
   bool use_book;
   int nLastDepth;
   int nLastScore;
@@ -583,8 +583,8 @@ static int SearchRoot(int nDepth, int vlAlpha, int vlBeta) {
 static void SearchMain(void) {
   int i, vl, nGenMoves;
   int mvs[MAX_GEN_MOVES];
-  clock_t deadline =
-      g_xqwl_sc->t_start + static_cast<clock_t>(g_xqwl_sc->time_limit_ms) * CLOCKS_PER_SEC / 1000;
+  const auto deadline =
+      g_xqwl_sc->t_start + std::chrono::milliseconds(g_xqwl_sc->time_limit_ms);
 
   g_xqwl_sc->nLastDepth = 0;
   g_xqwl_sc->nLastScore = XqwlEvalForSearch(XQWL_SEARCH_POS);
@@ -655,7 +655,7 @@ static void SearchMain(void) {
     if (SearchUnique(1 - WIN_VALUE, i)) {
       break;
     }
-    if (std::clock() >= deadline) {
+    if (std::chrono::steady_clock::now() >= deadline) {
       break;
     }
   }
@@ -675,7 +675,7 @@ inline XqwlSearchOutcome XqwlSearchBestMoveEx(PositionStruct &position, XqwlSear
   if (time_limit_ms < 50) {
     time_limit_ms = 50;
   }
-  XqwlSearchCtx ctx{&position, &tables, time_limit_ms, std::clock(), use_book, 0, 0, false, {}};
+  XqwlSearchCtx ctx{&position, &tables, time_limit_ms, std::chrono::steady_clock::now(), use_book, 0, 0, false, {}};
   g_xqwl_sc = &ctx;
   ctx.nLastScore = XqwlEvalForSearch(position);
   tables.mvResult = 0;
