@@ -133,6 +133,22 @@ struct XQWLPosition {
     return board.MakeMove(*mv);
   }
 
+  bool pseudo_legal_iccs(const std::string &iccs) const {
+    auto mv = iccs_to_move(iccs);
+    if (!mv)
+      return false;
+    return board.LegalMove(*mv);
+  }
+
+  bool try_make_move_iccs(const std::string &iccs) {
+    auto mv = iccs_to_move(iccs);
+    if (!mv || !board.LegalMove(*mv))
+      return false;
+    return board.MakeMove(*mv);
+  }
+
+  bool captured_last() const { return board.Captured() != 0; }
+
   void undo() { board.UndoMakeMove(); }
 
   bool in_check() const { return board.InCheck(); }
@@ -208,6 +224,9 @@ PYBIND11_MODULE(xqwlight_core, m) {
       .def("legal_moves_iccs", &XQWLPosition::legal_moves_iccs)
       .def("make_move_mv", &XQWLPosition::make_move_mv)
       .def("make_move_iccs", &XQWLPosition::make_move_iccs)
+      .def("pseudo_legal_iccs", &XQWLPosition::pseudo_legal_iccs)
+      .def("try_make_move_iccs", &XQWLPosition::try_make_move_iccs)
+      .def("captured_last", &XQWLPosition::captured_last)
       .def("undo", &XQWLPosition::undo)
       .def("in_check", &XQWLPosition::in_check)
       .def("rep_status", &XQWLPosition::rep_status, py::arg("n_recur") = 3)

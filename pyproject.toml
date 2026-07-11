@@ -22,3 +22,6 @@ mycchess-play-web = "mycchess_sf.play_web:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["mycchess_sf*"]
+
+[tool.setuptools.package-data]
+mycchess_sf = ["static/xqwl/*"]

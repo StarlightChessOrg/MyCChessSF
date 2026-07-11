@@ -6,7 +6,7 @@ PYTHON="${PYTHON:-$(command -v python3)}"
 
 echo "[build] Python: $PYTHON"
 "$PYTHON" -m pip install -q -U pip
-"$PYTHON" -m pip install -q pybind11 numpy
+"$PYTHON" -m pip install -q pybind11 numpy pillow
 # pybind11 CMake config must match the same interpreter used for the extension
 if ! "$PYTHON" -c "import pybind11; print('pybind11', pybind11.__version__, pybind11.get_cmake_dir())"; then
   echo "[build] Failed to import pybind11 after pip install" >&2
@@ -27,5 +27,9 @@ fi
 cp -f "$SO" "$ROOT/"
 echo "[build] Copied $(basename "$SO") -> $ROOT/"
 cd "$ROOT"
+if [[ ! -f mycchess_sf/static/xqwl/board.png ]]; then
+  echo "[build] Fetching XQWL UI assets..."
+  "$PYTHON" scripts/fetch_xqwl_assets.py
+fi
 "$PYTHON" -m pip install -q -e .
 echo "[build] Done. Run: mycchess-play-web --host 0.0.0.0 --port 5151"
