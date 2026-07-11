@@ -52,5 +52,4 @@ const int ASPIRATION_DELTA = 25;
 const int LMR_MOVE_THRESHOLD = 3;
 const int LMR_MIN_DEPTH = 3;
 const int QUIESCENCE_TT_DEPTH = 0;
-const int BOOK_SIZE = 16384;       // legacy fixed-table size (unused; kept for reference)
 const int BOOK_MAX_ENTRIES = 5000000; // max opening-book lines loaded into RAM

@@ -313,7 +313,7 @@ inline int MIRROR_SQUARE(int sq) {
   return COORD_XY(FILE_FLIP(FILE_X(sq)), RANK_Y(sq));
 }
 
-// Mirror square horizontally (file flip)
+// One rank forward for side sd (red +1 rank, black -1 rank)
 inline int SQUARE_FORWARD(int sq, int sd) {
   return sq - 16 + (sd << 5);
 }

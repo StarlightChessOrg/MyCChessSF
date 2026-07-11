@@ -1,11 +1,6 @@
 """ICCS move string parsing (e.g. ``7747-7767``)."""
 
 
-def iccs_y_to_board_view_row(y_iccs: int) -> int:
-    """ICCS / engine y (0=black top .. 9=red bottom) equals ``board_view`` row."""
-    return int(y_iccs)
-
-
 def parse_move_squares(move: str) -> tuple[int, int, int, int]:
     if len(move) < 5 or move[2] != "-":
         raise ValueError(f"Invalid move: {move!r}")
