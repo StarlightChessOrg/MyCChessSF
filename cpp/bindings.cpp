@@ -236,7 +236,21 @@ struct XQWLEngine {
     if (!nnue.loaded) {
       return 0;
     }
-    return nnue.evaluate_vl(position.board);
+    return nnue.evaluate_vl(position.board, nullptr);
+  }
+
+  int evaluate_nnue_raw(const XQWLPosition &position) const {
+    if (!nnue.loaded) {
+      return 0;
+    }
+    return nnue.evaluate_vl_raw(position.board, nullptr);
+  }
+
+  int verify_nnue_incremental(const XQWLPosition &position) const {
+    if (!nnue.loaded) {
+      return 0;
+    }
+    return nnue.verify_incremental(position.board);
   }
 
   int evaluate_static(const XQWLPosition &position) const { return position.board.Evaluate(); }
@@ -302,6 +316,8 @@ PYBIND11_MODULE(xqwlight_core, m) {
       .def("nnue_loaded", &XQWLEngine::nnue_loaded)
       .def("evaluate_static", &XQWLEngine::evaluate_static, py::arg("position"))
       .def("evaluate_nnue", &XQWLEngine::evaluate_nnue, py::arg("position"))
+      .def("evaluate_nnue_raw", &XQWLEngine::evaluate_nnue_raw, py::arg("position"))
+      .def("verify_nnue_incremental", &XQWLEngine::verify_nnue_incremental, py::arg("position"))
       .def("search_best_iccs", &XQWLEngine::search_best_iccs, py::arg("position"), py::arg("time_ms") = 1000,
            py::arg("use_book") = true)
       .def("search_best_mv", &XQWLEngine::search_best_mv, py::arg("position"), py::arg("time_ms") = 1000,

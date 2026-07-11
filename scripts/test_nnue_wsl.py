@@ -54,9 +54,11 @@ def main() -> None:
 
     pos = xc.Position()
     py_vl = py_nnue_vl(py_model, pos.fen())
-    cpp_vl = engine.evaluate_nnue(pos)
+    cpp_vl = engine.evaluate_nnue_raw(pos)
     print("[startpos]")
-    print(f"  PST={pos.evaluate()}  C++ NNUE={cpp_vl}  Py NNUE={py_vl:.2f}  |diff|={abs(cpp_vl - py_vl):.2f}")
+    print(f"  PST={pos.evaluate()}  C++ raw={cpp_vl}  Py NNUE={py_vl:.2f}  |diff|={abs(cpp_vl - py_vl):.2f}")
+    inc_drift = engine.verify_nnue_incremental(pos)
+    print(f"  incremental drift (root+1ply): {inc_drift}")
 
     samples = load_samples(data_path, 500)
     diffs: list[float] = []
@@ -67,7 +69,7 @@ def main() -> None:
         if not pos.set_fen(fen):
             skipped += 1
             continue
-        cpp = engine.evaluate_nnue(pos)
+        cpp = engine.evaluate_nnue_raw(pos)
         py = py_nnue_vl(py_model, fen)
         d = abs(cpp - py)
         diffs.append(d)
@@ -90,7 +92,7 @@ def main() -> None:
     detail2 = engine.search_best_detail(pos, 200, False)
     print(f"[search+pst] iccs={detail2['iccs']!r} depth={detail2['depth']} score={detail2['score']}")
 
-    ok = diffs_arr.max() <= 5.0 and abs(cpp_vl - py_vl) <= 1.0
+    ok = diffs_arr.max() <= 5.0 and abs(cpp_vl - py_vl) <= 1.0 and inc_drift == 0
     print(f"\n{'PASS' if ok else 'CHECK'}: C++ NNUE matches Python reference")
     sys.exit(0 if ok else 1)
 

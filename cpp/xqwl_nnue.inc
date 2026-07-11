@@ -1,8 +1,16 @@
-// MyCChessSF INT8 NNUE inference (XQWL-PSQ features, mycchesssf_xqint8_v1 weights).
-// Include after xqwl_extract.inc (needs PositionStruct).
+// MyCChessSF INT8 NNUE: dual-perspective FT accumulators, SIMD, mate-aware scoring.
+//
+// Dual accumulator (NOT dual scoring):
+//   acc[0] / acc[1] hold FT int32 sums under virtual_stm=0 (red) / 1 (black).
+//   Feature indices depend on perspective; after MakeMove sdPlayer flips, so we
+//   keep both FT states incrementally and evaluate with acc[pos.sdPlayer] only.
+//   FC forward runs once per eval — never two final scores.
 #ifndef XQWL_NNUE_INC
 #define XQWL_NNUE_INC
 
+#include "xqwl_nnue_simd.h"
+
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -16,8 +24,18 @@ constexpr int kKinds = 7;
 constexpr int kFeatures = kKinds * kSquares * 2;
 constexpr int kEnemyOffset = kKinds * kSquares;
 constexpr int kMaxActive = 40;
+constexpr int kMaxL1 = 512;
+constexpr int kMaxDelta = 4;
+
+// Mate / extreme score handling (XQWL centipawn scale).
+constexpr int kMateZonePst = WIN_VALUE - 800;   // PST says winning/losing huge
+constexpr int kNnueHardClamp = 3200;            // compress beyond this
+constexpr int kNnueSoftClamp = 2400;            // typical reliable zone
+constexpr int kTacticalBlendPst = 1500;         // blend when PST is large
 
 inline int coord_xy_iccs(int x, int y) { return (x + 3) + ((y + 3) << 4); }
+inline int iccs_x_from_sq(int sq) { return (sq & 15) - 3; }
+inline int iccs_y_from_sq(int sq) { return (sq >> 4) - 3; }
 
 inline int feature_index(int kind, int sq, bool friendly) {
   const int base = friendly ? 0 : kEnemyOffset;
@@ -31,7 +49,32 @@ inline int piece_kind(BYTE pc) {
   return static_cast<int>(pc) - 16;
 }
 
-inline void extract_features(const PositionStruct &pos, int *out, int &count) {
+inline int feature_from_sq_pc(int sq, BYTE pc, int virtual_stm) {
+  if (!pc) {
+    return -1;
+  }
+  const int kind = piece_kind(pc);
+  if (kind < 0 || kind > 6) {
+    return -1;
+  }
+  const int x = iccs_x_from_sq(sq);
+  const int y = iccs_y_from_sq(sq);
+  if (x < 0 || x > 8 || y < 0 || y > 9) {
+    return -1;
+  }
+  bool friendly;
+  int view_y;
+  if (virtual_stm == 0) {
+    friendly = pc < 16;
+    view_y = y;
+  } else {
+    friendly = pc >= 16;
+    view_y = 9 - y;
+  }
+  return feature_index(kind, view_y * 9 + x, friendly);
+}
+
+inline void extract_features_perspective(const PositionStruct &pos, int virtual_stm, int *out, int &count) {
   count = 0;
   for (int y = 0; y < 10; ++y) {
     for (int x = 0; x < 9; ++x) {
@@ -40,22 +83,9 @@ inline void extract_features(const PositionStruct &pos, int *out, int &count) {
       if (!pc) {
         continue;
       }
-      const int kind = piece_kind(pc);
-      if (kind < 0 || kind > 6) {
-        continue;
-      }
-      int view_y;
-      bool friendly;
-      if (pos.sdPlayer == 0) {
-        view_y = y;
-        friendly = pc < 16;
-      } else {
-        view_y = 9 - y;
-        friendly = pc >= 16;
-      }
-      const int sq_idx = view_y * 9 + x;
-      if (count < kMaxActive) {
-        out[count++] = feature_index(kind, sq_idx, friendly);
+      const int idx = feature_from_sq_pc(sq, pc, virtual_stm);
+      if (idx >= 0 && count < kMaxActive) {
+        out[count++] = idx;
       }
     }
   }
@@ -88,104 +118,19 @@ struct Weights {
   std::vector<float> fc2_scales;
 };
 
-struct EvalWork {
-  const Weights *w = nullptr;
-  std::vector<float> acc;
-  std::vector<float> h;
-  std::vector<float> x0;
-  std::vector<float> x0_cat;
-  std::vector<float> x1;
-  std::vector<float> x1_cat;
+struct AccDelta {
+  std::int8_t n_rem[2]{};
+  std::int8_t n_add[2]{};
+  std::int16_t rem[2][kMaxDelta]{};
+  std::int16_t add[2][kMaxDelta]{};
+};
 
-  explicit EvalWork(const Weights &weights) : w(&weights) {
-    acc.assign(static_cast<size_t>(w->l1), 0.f);
-    h.assign(static_cast<size_t>(w->l1), 0.f);
-    x0.assign(static_cast<size_t>(w->l2), 0.f);
-    x0_cat.assign(static_cast<size_t>(w->l2 * 2), 0.f);
-    x1.assign(static_cast<size_t>(w->l3), 0.f);
-    x1_cat.assign(static_cast<size_t>(w->l3 * 2), 0.f);
-  }
-
-  static float clipped_relu(float x, float max_val) {
-    if (x <= 0.f) {
-      return 0.f;
-    }
-    return x > max_val ? max_val : x;
-  }
-
-  static float sq_clipped_relu(float x, float max_val) {
-    const float sq = x * x;
-    return sq > max_val ? max_val : sq;
-  }
-
-  void feature_transform() {
-    const int l1 = w->l1;
-    for (int i = 0; i < l1; ++i) {
-      float v = acc[static_cast<size_t>(i)];
-      if (v < 0.f) {
-        v = 0.f;
-      } else if (v > w->ft_clip) {
-        v = w->ft_clip;
-      }
-      acc[static_cast<size_t>(i)] = v;
-    }
-    for (int i = 0; i < l1; i += 2) {
-      const float prod = acc[static_cast<size_t>(i)] * acc[static_cast<size_t>(i + 1)] / 512.f;
-      h[static_cast<size_t>(i)] = prod;
-      h[static_cast<size_t>(i + 1)] = prod;
-    }
-  }
-
-  void linear_fc(const std::vector<std::int8_t> &weight, const std::vector<std::int32_t> &bias,
-                 const std::vector<float> &scales, const float *input, int in_dim, float *output,
-                 int out_dim) {
-    for (int o = 0; o < out_dim; ++o) {
-      float sum = static_cast<float>(bias[static_cast<size_t>(o)]) * scales[static_cast<size_t>(o)];
-      const float scale = scales[static_cast<size_t>(o)];
-      const std::int8_t *row = weight.data() + static_cast<size_t>(o) * static_cast<size_t>(in_dim);
-      for (int i = 0; i < in_dim; ++i) {
-        sum += static_cast<float>(row[i]) * scale * input[i];
-      }
-      output[o] = sum;
-    }
-  }
-
-  float forward(const PositionStruct &pos) {
-    int feats[kMaxActive];
-    int n_feat = 0;
-    extract_features(pos, feats, n_feat);
-
-    const int l1 = w->l1;
-    for (int j = 0; j < l1; ++j) {
-      acc[static_cast<size_t>(j)] =
-          static_cast<float>(w->ft_b[static_cast<size_t>(j)]) * w->ft_scales[static_cast<size_t>(j)];
-    }
-    for (int fi = 0; fi < n_feat; ++fi) {
-      const int idx = feats[fi];
-      if (idx < 0 || idx >= w->n_features) {
-        continue;
-      }
-      const std::int8_t *row = w->ft_w.data() + static_cast<size_t>(idx) * static_cast<size_t>(l1);
-      for (int j = 0; j < l1; ++j) {
-        acc[static_cast<size_t>(j)] += static_cast<float>(row[j]) * w->ft_scales[static_cast<size_t>(j)];
-      }
-    }
-
-    feature_transform();
-    linear_fc(w->fc0_w, w->fc0_b, w->fc0_scales, h.data(), l1, x0.data(), w->l2);
-    for (int i = 0; i < w->l2; ++i) {
-      x0_cat[static_cast<size_t>(i)] = sq_clipped_relu(x0[static_cast<size_t>(i)], w->act_clip);
-      x0_cat[static_cast<size_t>(w->l2 + i)] = clipped_relu(x0[static_cast<size_t>(i)], w->act_clip);
-    }
-    linear_fc(w->fc1_w, w->fc1_b, w->fc1_scales, x0_cat.data(), w->l2 * 2, x1.data(), w->l3);
-    for (int i = 0; i < w->l3; ++i) {
-      x1_cat[static_cast<size_t>(i)] = sq_clipped_relu(x1[static_cast<size_t>(i)], w->act_clip);
-      x1_cat[static_cast<size_t>(w->l3 + i)] = clipped_relu(x1[static_cast<size_t>(i)], w->act_clip);
-    }
-    float out = 0.f;
-    linear_fc(w->fc2_w, w->fc2_b, w->fc2_scales, x1_cat.data(), w->l3 * 2, &out, 1);
-    return out;
-  }
+struct SearchState {
+  alignas(64) std::int32_t acc[2][kMaxL1]{};
+  AccDelta stack[LIMIT_DEPTH + 16];
+  int stack_top = 0;
+  int l1 = 0;
+  bool ready = false;
 };
 
 struct Runtime {
@@ -239,7 +184,8 @@ struct Runtime {
               read_exact(f, &l2, sizeof(l2)) && read_exact(f, &l3, sizeof(l3)) &&
               read_exact(f, &ft_clip, sizeof(ft_clip)) && read_exact(f, &act_clip, sizeof(act_clip));
 
-    if (!ok || n_features != static_cast<std::uint32_t>(kFeatures) || l1 == 0 || l2 == 0 || l3 == 0) {
+    if (!ok || n_features != static_cast<std::uint32_t>(kFeatures) || l1 == 0 || l2 == 0 || l3 == 0 ||
+        l1 > static_cast<std::uint32_t>(kMaxL1)) {
       std::fclose(f);
       return false;
     }
@@ -273,15 +219,249 @@ struct Runtime {
 
     w = std::move(nw);
     loaded = true;
+    simd::init();
     return true;
   }
 
-  int evaluate_vl(const PositionStruct &pos) const {
+  void acc_refresh_perspective(SearchState &st, int persp, const PositionStruct &pos) const {
+    const int l1 = w.l1;
+    st.l1 = l1;
+    for (int j = 0; j < l1; ++j) {
+      st.acc[persp][j] = w.ft_b[static_cast<size_t>(j)];
+    }
+    int feats[kMaxActive];
+    int n_feat = 0;
+    extract_features_perspective(pos, persp, feats, n_feat);
+    for (int fi = 0; fi < n_feat; ++fi) {
+      const int idx = feats[fi];
+      if (idx < 0 || idx >= w.n_features) {
+        continue;
+      }
+      simd::acc_add_column(st.acc[persp], w.ft_w.data() + static_cast<size_t>(idx) * static_cast<size_t>(l1), l1, +1);
+    }
+  }
+
+  void acc_init(SearchState &st, const PositionStruct &pos) const {
+    st.stack_top = 0;
+    st.l1 = w.l1;
+    // Both FT views: cheap incremental updates on MakeMove; eval uses acc[sdPlayer] only.
+    acc_refresh_perspective(st, 0, pos);
+    acc_refresh_perspective(st, 1, pos);
+    st.ready = true;
+  }
+
+  void acc_apply_column_delta(SearchState &st, int persp, const std::int16_t *idx, int n, int sign) const {
+    const int l1 = w.l1;
+    for (int i = 0; i < n; ++i) {
+      const int f = idx[i];
+      if (f < 0 || f >= w.n_features) {
+        continue;
+      }
+      simd::acc_add_column(st.acc[persp], w.ft_w.data() + static_cast<size_t>(f) * static_cast<size_t>(l1), l1, sign);
+    }
+  }
+
+  void acc_apply_move(SearchState &st, const PositionStruct &pos, int mv) const {
+    if (!st.ready || st.stack_top >= LIMIT_DEPTH + 15) {
+      return;
+    }
+    AccDelta &d = st.stack[st.stack_top++];
+
+    const int sq_src = mv & 255;
+    const int sq_dst = mv >> 8;
+    const BYTE pc = pos.ucpcSquares[sq_src];
+    const BYTE cap = pos.ucpcSquares[sq_dst];
+
+    for (int persp = 0; persp < 2; ++persp) {
+      // Update both FT encodings; only acc[sdPlayer] is read at eval time.
+      d.n_rem[persp] = 0;
+      d.n_add[persp] = 0;
+      const int f_src = feature_from_sq_pc(sq_src, pc, persp);
+      if (f_src >= 0) {
+        d.rem[persp][d.n_rem[persp]++] = static_cast<std::int16_t>(f_src);
+      }
+      if (cap) {
+        const int f_cap = feature_from_sq_pc(sq_dst, cap, persp);
+        if (f_cap >= 0) {
+          d.rem[persp][d.n_rem[persp]++] = static_cast<std::int16_t>(f_cap);
+        }
+      }
+      const int f_dst = feature_from_sq_pc(sq_dst, pc, persp);
+      if (f_dst >= 0) {
+        d.add[persp][d.n_add[persp]++] = static_cast<std::int16_t>(f_dst);
+      }
+      acc_apply_column_delta(st, persp, d.rem[persp], d.n_rem[persp], -1);
+      acc_apply_column_delta(st, persp, d.add[persp], d.n_add[persp], +1);
+    }
+  }
+
+  void acc_undo(SearchState &st) const {
+    if (!st.ready || st.stack_top <= 0) {
+      return;
+    }
+    AccDelta &d = st.stack[--st.stack_top];
+    for (int persp = 0; persp < 2; ++persp) {
+      acc_apply_column_delta(st, persp, d.add[persp], d.n_add[persp], -1);
+      acc_apply_column_delta(st, persp, d.rem[persp], d.n_rem[persp], +1);
+    }
+  }
+
+  static float clipped_relu(float x, float max_val) {
+    if (x <= 0.f) {
+      return 0.f;
+    }
+    return x > max_val ? max_val : x;
+  }
+
+  static float sq_clipped_relu(float x, float max_val) {
+    const float sq = x * x;
+    return sq > max_val ? max_val : sq;
+  }
+
+  void fc_forward_float(const std::int8_t *w, const std::int32_t *bias, const float *scales, int out_dim,
+                        int in_dim, const float *in, float *out) const {
+    for (int o = 0; o < out_dim; ++o) {
+      const std::int8_t *row = w + static_cast<size_t>(o) * static_cast<size_t>(in_dim);
+      const float scale = scales[o];
+      out[o] = simd::fc_row_i8_f32(row, in, in_dim, static_cast<float>(bias[o]) * scale, scale);
+    }
+  }
+
+  float forward_norm_from_acc(const SearchState &st, int persp) const {
+    const int l1 = w.l1;
+    const int l2 = w.l2;
+    const int l3 = w.l3;
+
+    float h[kMaxL1];
+    for (int j = 0; j < l1; ++j) {
+      float v = static_cast<float>(st.acc[persp][j]) * w.ft_scales[static_cast<size_t>(j)];
+      if (v < 0.f) {
+        v = 0.f;
+      } else if (v > w.ft_clip) {
+        v = w.ft_clip;
+      }
+      h[j] = v;
+    }
+    for (int i = 0; i < l1; i += 2) {
+      const float prod = h[i] * h[i + 1] / 512.f;
+      h[i] = prod;
+      h[i + 1] = prod;
+    }
+
+    float x0[64];
+    float x0_cat[128];
+    fc_forward_float(w.fc0_w.data(), w.fc0_b.data(), w.fc0_scales.data(), l2, l1, h, x0);
+    for (int i = 0; i < l2; ++i) {
+      x0_cat[i] = sq_clipped_relu(x0[i], w.act_clip);
+      x0_cat[l2 + i] = clipped_relu(x0[i], w.act_clip);
+    }
+
+    float x1[64];
+    float x1_cat[128];
+    fc_forward_float(w.fc1_w.data(), w.fc1_b.data(), w.fc1_scales.data(), l3, l2 * 2, x0_cat, x1);
+    for (int i = 0; i < l3; ++i) {
+      x1_cat[i] = sq_clipped_relu(x1[i], w.act_clip);
+      x1_cat[l3 + i] = clipped_relu(x1[i], w.act_clip);
+    }
+
+    float x2[1];
+    fc_forward_float(w.fc2_w.data(), w.fc2_b.data(), w.fc2_scales.data(), 1, l3 * 2, x1_cat, x2);
+    return x2[0];
+  }
+
+  float forward_norm_full(const PositionStruct &pos) const {
+    SearchState tmp{};
+    acc_init(tmp, pos);
+    return forward_norm_from_acc(tmp, pos.sdPlayer);
+  }
+
+  static int compress_extreme_vl(int vl) {
+    if (vl > kNnueHardClamp) {
+      return kNnueHardClamp + (vl - kNnueHardClamp) / 4;
+    }
+    if (vl < -kNnueHardClamp) {
+      return -kNnueHardClamp + (vl + kNnueHardClamp) / 4;
+    }
+    return vl;
+  }
+
+  int finalize_vl(int nnue_vl, const PositionStruct &pos) const {
+    const int pst = pos.Evaluate();
+
+    if (std::abs(pst) >= kMateZonePst) {
+      return pst;
+    }
+
+    int vl = compress_extreme_vl(nnue_vl);
+
+    if (pos.InCheck()) {
+      vl = (vl * 3 + pst) / 4;
+    }
+
+    if (std::abs(pst) >= kTacticalBlendPst && std::abs(pst - vl) > 2000) {
+      vl = (vl + pst * 2) / 3;
+    }
+
+    if (vl > kNnueSoftClamp) {
+      vl = kNnueSoftClamp + (vl - kNnueSoftClamp) * 2 / 3;
+    } else if (vl < -kNnueSoftClamp) {
+      vl = -kNnueSoftClamp + (vl + kNnueSoftClamp) * 2 / 3;
+    }
+
+    return vl;
+  }
+
+  int evaluate_vl(const PositionStruct &pos, SearchState *st) const {
     if (!loaded) {
       return 0;
     }
-    const double pred_norm = static_cast<double>(EvalWork(w).forward(pos));
-    return static_cast<int>(std::lround(pred_norm * w.label_std + w.label_mean));
+    float norm = 0.f;
+    if (st != nullptr && st->ready) {
+      norm = forward_norm_from_acc(*st, pos.sdPlayer);
+    } else {
+      norm = forward_norm_full(pos);
+    }
+    const int raw = static_cast<int>(std::lround(norm * w.label_std + w.label_mean));
+    return finalize_vl(raw, pos);
+  }
+
+  int evaluate_vl_raw(const PositionStruct &pos, SearchState *st) const {
+    if (!loaded) {
+      return 0;
+    }
+    float norm = 0.f;
+    if (st != nullptr && st->ready) {
+      norm = forward_norm_from_acc(*st, pos.sdPlayer);
+    } else {
+      norm = forward_norm_full(pos);
+    }
+    return static_cast<int>(std::lround(norm * w.label_std + w.label_mean));
+  }
+
+  /** Max |incremental - full| over root and one-ply legal positions (diagnostics). */
+  int verify_incremental(const PositionStruct &pos) const {
+    if (!loaded) {
+      return 0;
+    }
+    int max_diff = 0;
+    SearchState st{};
+    acc_init(st, pos);
+    max_diff = std::max(max_diff, std::abs(evaluate_vl_raw(pos, &st) - evaluate_vl_raw(pos, nullptr)));
+
+    int mvs[MAX_GEN_MOVES];
+    const int n_gen = pos.GenerateMoves(mvs, FALSE);
+    for (int i = 0; i < n_gen; ++i) {
+      PositionStruct trial = pos;
+      SearchState st_move = st;
+      acc_apply_move(st_move, pos, mvs[i]);
+      if (!trial.MakeMove(mvs[i])) {
+        continue;
+      }
+      const int inc = evaluate_vl_raw(trial, &st_move);
+      const int full = evaluate_vl_raw(trial, nullptr);
+      max_diff = std::max(max_diff, std::abs(inc - full));
+    }
+    return max_diff;
   }
 };
 

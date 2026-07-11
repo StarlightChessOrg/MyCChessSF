@@ -37,6 +37,7 @@ struct XqwlSearchCtx {
   int nLastDepth;
   int nLastScore;
   bool from_book;
+  xqwl_nnue::SearchState nnue_st;
 };
 
 static thread_local XqwlSearchCtx *g_xqwl_sc = nullptr;
@@ -51,9 +52,33 @@ inline XqwlSearchTables &xqwl_tab() { return *g_xqwl_sc->tab; }
 inline int XqwlEvalForSearch(const PositionStruct &pos) {
   if (g_xqwl_sc != nullptr && g_xqwl_sc->tab != nullptr && g_xqwl_sc->tab->nnue != nullptr &&
       g_xqwl_sc->tab->nnue->loaded) {
-    return g_xqwl_sc->tab->nnue->evaluate_vl(pos);
+    return g_xqwl_sc->tab->nnue->evaluate_vl(pos, &g_xqwl_sc->nnue_st);
   }
   return pos.Evaluate();
+}
+
+inline bool XqwlSearchMakeMove(int mv) {
+  xqwl_nnue::Runtime *nnue =
+      (g_xqwl_sc != nullptr && g_xqwl_sc->tab != nullptr) ? g_xqwl_sc->tab->nnue : nullptr;
+  if (nnue != nullptr && nnue->loaded) {
+    nnue->acc_apply_move(g_xqwl_sc->nnue_st, XQWL_SEARCH_POS, mv);
+  }
+  if (!XQWL_SEARCH_POS.MakeMove(mv)) {
+    if (nnue != nullptr && nnue->loaded) {
+      nnue->acc_undo(g_xqwl_sc->nnue_st);
+    }
+    return false;
+  }
+  return true;
+}
+
+inline void XqwlSearchUndoMakeMove() {
+  xqwl_nnue::Runtime *nnue =
+      (g_xqwl_sc != nullptr && g_xqwl_sc->tab != nullptr) ? g_xqwl_sc->tab->nnue : nullptr;
+  if (nnue != nullptr && nnue->loaded) {
+    nnue->acc_undo(g_xqwl_sc->nnue_st);
+  }
+  XQWL_SEARCH_POS.UndoMakeMove();
 }
 
 #ifndef XQWL_NO_BOOK_LOADER
@@ -331,9 +356,9 @@ static int SearchQuiesc(int vlAlpha, int vlBeta) {
   }
 
   for (i = 0; i < nGenMoves; i++) {
-    if (XQWL_SEARCH_POS.MakeMove(mvs[i])) {
+    if (XqwlSearchMakeMove(mvs[i])) {
       vl = -SearchQuiesc(-vlBeta, -vlAlpha);
-      XQWL_SEARCH_POS.UndoMakeMove();
+      XqwlSearchUndoMakeMove();
       if (vl > vlBest) {
         vlBest = vl;
         if (vl >= vlBeta) {
@@ -382,7 +407,7 @@ static int SearchFull(int vlAlpha, int vlBeta, int nDepth, BOOL bNoNull = FALSE)
   mvBest = 0;
   Sort.Init(mvHash);
   while ((mv = Sort.Next()) != 0) {
-    if (XQWL_SEARCH_POS.MakeMove(mv)) {
+    if (XqwlSearchMakeMove(mv)) {
       nNewDepth = XQWL_SEARCH_POS.InCheck() ? nDepth : nDepth - 1;
       if (vlBest == -MATE_VALUE) {
         vl = -SearchFull(-vlBeta, -vlAlpha, nNewDepth);
@@ -392,7 +417,7 @@ static int SearchFull(int vlAlpha, int vlBeta, int nDepth, BOOL bNoNull = FALSE)
           vl = -SearchFull(-vlBeta, -vlAlpha, nNewDepth);
         }
       }
-      XQWL_SEARCH_POS.UndoMakeMove();
+      XqwlSearchUndoMakeMove();
       if (vl > vlBest) {
         vlBest = vl;
         if (vl >= vlBeta) {
@@ -425,7 +450,7 @@ static int SearchRoot(int nDepth) {
   vlBest = -MATE_VALUE;
   Sort.Init(XQWL_SEARCH_TAB.mvResult);
   while ((mv = Sort.Next()) != 0) {
-    if (XQWL_SEARCH_POS.MakeMove(mv)) {
+    if (XqwlSearchMakeMove(mv)) {
       nNewDepth = XQWL_SEARCH_POS.InCheck() ? nDepth : nDepth - 1;
       if (vlBest == -MATE_VALUE) {
         vl = -SearchFull(-MATE_VALUE, MATE_VALUE, nNewDepth, NO_NULL);
@@ -435,7 +460,7 @@ static int SearchRoot(int nDepth) {
           vl = -SearchFull(-MATE_VALUE, -vlBest, nNewDepth, NO_NULL);
         }
       }
-      XQWL_SEARCH_POS.UndoMakeMove();
+      XqwlSearchUndoMakeMove();
       if (vl > vlBest) {
         vlBest = vl;
         XQWL_SEARCH_TAB.mvResult = mv;
@@ -464,18 +489,24 @@ static void SearchMain(void) {
   std::memset(XQWL_SEARCH_TAB.HashTable, 0, HASH_SIZE * sizeof(HashItem));
   XQWL_SEARCH_POS.nDistance = 0;
 
+  if (g_xqwl_sc->tab->nnue != nullptr && g_xqwl_sc->tab->nnue->loaded) {
+    g_xqwl_sc->tab->nnue->acc_init(g_xqwl_sc->nnue_st, XQWL_SEARCH_POS);
+  } else {
+    g_xqwl_sc->nnue_st.ready = false;
+  }
+
   if (g_xqwl_sc->use_book) {
     XQWL_SEARCH_TAB.mvResult = SearchBook();
     if (XQWL_SEARCH_TAB.mvResult != 0) {
-      if (XQWL_SEARCH_POS.MakeMove(XQWL_SEARCH_TAB.mvResult)) {
+      if (XqwlSearchMakeMove(XQWL_SEARCH_TAB.mvResult)) {
         if (XQWL_SEARCH_POS.RepStatus(3) == 0) {
-          XQWL_SEARCH_POS.UndoMakeMove();
+          XqwlSearchUndoMakeMove();
           g_xqwl_sc->from_book = true;
           g_xqwl_sc->nLastDepth = 0;
           g_xqwl_sc->nLastScore = XqwlEvalForSearch(XQWL_SEARCH_POS);
           return;
         }
-        XQWL_SEARCH_POS.UndoMakeMove();
+        XqwlSearchUndoMakeMove();
       }
     }
   }
@@ -483,8 +514,8 @@ static void SearchMain(void) {
   vl = 0;
   nGenMoves = XQWL_SEARCH_POS.GenerateMoves(mvs);
   for (i = 0; i < nGenMoves; i++) {
-    if (XQWL_SEARCH_POS.MakeMove(mvs[i])) {
-      XQWL_SEARCH_POS.UndoMakeMove();
+    if (XqwlSearchMakeMove(mvs[i])) {
+      XqwlSearchUndoMakeMove();
       XQWL_SEARCH_TAB.mvResult = mvs[i];
       vl++;
     }
@@ -522,7 +553,7 @@ inline XqwlSearchOutcome XqwlSearchBestMoveEx(PositionStruct &position, XqwlSear
   if (time_limit_ms < 50) {
     time_limit_ms = 50;
   }
-  XqwlSearchCtx ctx{&position, &tables, time_limit_ms, std::clock(), use_book, 0, 0, false};
+  XqwlSearchCtx ctx{&position, &tables, time_limit_ms, std::clock(), use_book, 0, 0, false, {}};
   g_xqwl_sc = &ctx;
   ctx.nLastScore = XqwlEvalForSearch(position);
   tables.mvResult = 0;
