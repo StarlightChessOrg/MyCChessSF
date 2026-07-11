@@ -457,7 +457,7 @@ def main() -> None:
 
     p = argparse.ArgumentParser(description="MyCChessSF 网页对弈（象棋小巫师 XQWL06）")
     p.add_argument("--host", type=str, default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8080)
+    p.add_argument("--port", type=int, default=5151)
     p.add_argument("--think-ms", type=int, default=1000, help="小巫师每步思考时间（毫秒）")
     p.add_argument(
         "--book",

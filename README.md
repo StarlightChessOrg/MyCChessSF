@@ -42,7 +42,7 @@ pip install -e ..
 ## 网页对弈
 
 ```bash
-mycchess-play-web --host 0.0.0.0 --port 8080
+mycchess-play-web --host 0.0.0.0 --port 5151
 mycchess-play-web --think-ms 2000          # 每步思考毫秒数
 mycchess-play-web --no-book-default        # 启动时默认不用开局库
 ```

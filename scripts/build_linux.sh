@@ -28,4 +28,4 @@ cp -f "$SO" "$ROOT/"
 echo "[build] Copied $(basename "$SO") -> $ROOT/"
 cd "$ROOT"
 "$PYTHON" -m pip install -q -e .
-echo "[build] Done. Run: mycchess-play-web --host 0.0.0.0 --port 8080"
+echo "[build] Done. Run: mycchess-play-web --host 0.0.0.0 --port 5151"
