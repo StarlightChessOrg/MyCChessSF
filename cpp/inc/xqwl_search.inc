@@ -774,6 +774,8 @@ inline XqwlSearchOutcome XqwlSearchBestMoveEx(PositionStruct &position, XqwlSear
   }
   XqwlSearchCtx ctx{&position, &tables, time_limit_ms, std::chrono::steady_clock::now(),
                     use_book, max_depth, 0, 0, false, {}};
+  // Blend PST once for this search from the root position; tree MakeMove stays incremental.
+  position.RefreshPst();
   g_xqwl_sc = &ctx;
   ctx.nLastScore = XqwlEvalForSearch(position);
   tables.mvResult = 0;

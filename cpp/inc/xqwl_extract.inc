@@ -529,7 +529,7 @@ struct PositionStruct {
   int Evaluate(void) const {      // Static evaluation from side to move
     return (sdPlayer == 0 ? vlWhite - vlBlack : vlBlack - vlWhite) + pst.vlAdvanced;
   }
-  void RefreshPst(void);          // Rebuild blended PST and material totals
+  void RefreshPst(void);          // Rebuild blended PST (call on real board changes / before search)
   BOOL InCheck(void) const {      // Was side to move in check after last move
     return mvsList[nMoveNum - 1].ucbCheck;
   }
@@ -639,7 +639,8 @@ void PositionStruct::Startup(void) {
   SetIrrev();
 }
 
-// Rebuild blended PST and material totals for the current board
+// Rebuild blended PST and material totals for the current board.
+// Not called from search-tree MakeMove/UndoMakeMove; invoke on real ply or at search root.
 void PositionStruct::RefreshPst(void) {
   xqwl_pst::refresh(*this);
 }
@@ -690,17 +691,15 @@ BOOL PositionStruct::MakeMove(int mv) {
   mvsList[nMoveNum].Set(mv, pcCaptured, Checked(), dwKey);
   nMoveNum ++;
   nDistance ++;
-  RefreshPst();
   return TRUE;
 }
 
-// Undo one ply and refresh PST for the restored irreversible position
+// Undo one ply (search/game tree; PST is not re-blended here)
 void PositionStruct::UndoMakeMove(void) {
   nDistance --;
   nMoveNum --;
   ChangeSide();
   UndoMovePiece(mvsList[nMoveNum].wmv, mvsList[nMoveNum].ucpcCaptured);
-  RefreshPst();
 }
 
 // GenerateMoves flag

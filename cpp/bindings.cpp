@@ -139,13 +139,20 @@ struct XQWLPosition {
     return s;
   }
 
-  bool make_move_mv(int mv) { return board.MakeMove(mv); }
+  bool make_move_mv(int mv) {
+    if (!board.MakeMove(mv)) {
+      return false;
+    }
+    board.RefreshPst();
+    return true;
+  }
 
   bool make_move_iccs(const std::string &iccs) {
     auto mv = iccs_to_move(iccs);
-    if (!mv)
+    if (!mv) {
       return false;
-    return board.MakeMove(*mv);
+    }
+    return make_move_mv(*mv);
   }
 
   bool pseudo_legal_iccs(const std::string &iccs) const {
@@ -157,14 +164,18 @@ struct XQWLPosition {
 
   bool try_make_move_iccs(const std::string &iccs) {
     auto mv = iccs_to_move(iccs);
-    if (!mv || !board.LegalMove(*mv))
+    if (!mv || !board.LegalMove(*mv)) {
       return false;
-    return board.MakeMove(*mv);
+    }
+    return make_move_mv(*mv);
   }
 
   bool captured_last() const { return board.Captured() != 0; }
 
-  void undo() { board.UndoMakeMove(); }
+  void undo() {
+    board.UndoMakeMove();
+    board.RefreshPst();
+  }
 
   bool in_check() const { return board.InCheck(); }
 

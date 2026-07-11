@@ -334,6 +334,7 @@ void worker_main(int worker_id, long long quota, const GenConfig &cfg) {
         mv = pick_random_move(pos);
       if (mv == 0 || !pos.MakeMove(mv))
         break;
+      pos.RefreshPst();
       if (terminal_kind(pos) != 0)
         break;
     }
