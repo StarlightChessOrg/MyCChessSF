@@ -9,6 +9,14 @@ DEPLOY_BIN="$DEPLOY/bin"
 DEPLOY_LIB="$DEPLOY/lib"
 DEPLOY_DB="$DEPLOY/db"
 
+# WSL + DrvFS (/mnt/c, …): Windows host clock can be ahead of Linux, so CMake-
+# generated Makefiles look "in the future" and gmake warns about clock skew.
+sync_build_timestamps() {
+  local dir="${1:-.}"
+  [[ -d "$dir" ]] || return 0
+  find "$dir" -type f -exec touch {} + 2>/dev/null || true
+}
+
 echo "[build] Python: $PYTHON"
 echo "[build] CXXOPT: $CXXOPT"
 "$PYTHON" -m pip install -q -U pip
@@ -23,6 +31,12 @@ rm -rf build
 mkdir -p build
 cd build
 cmake .. -DPython_EXECUTABLE="$PYTHON" -DCMAKE_CXX_FLAGS="$CXXOPT"
+case "$ROOT" in
+  /mnt/*)
+    echo "[build] DrvFS mount detected; syncing build timestamps (WSL clock skew)..."
+    sync_build_timestamps .
+    ;;
+esac
 cmake --build . -j"$(nproc 2>/dev/null || echo 2)"
 SO="$(find . -maxdepth 1 -name 'xqwlight_core*.so' | head -1)"
 GEN="$(find . -maxdepth 1 -name 'xqwl_gen_nnue' -type f | head -1)"
