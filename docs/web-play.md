@@ -19,6 +19,7 @@ pip install -r deployment/requirements.txt
 mycchess-play-web --host 0.0.0.0 --port 5151
 mycchess-play-web --think-ms 2000          # 每步思考毫秒数
 mycchess-play-web --no-book-default        # 启动时默认不用开局库
+mycchess-play-web --no-nnue-default        # 有 NNUE 权重时也默认用 PST
 ```
 
 ## 默认对局设置
@@ -36,7 +37,8 @@ mycchess-play-web --no-book-default        # 启动时默认不用开局库
 
 | 选项 | 说明 |
 |------|------|
-| 引擎使用开局库 | 侧栏文案仍为「小巫师使用开局库」（XQWL 遗留 UI）；见 [开局库](opening-book.md) |
+| 使用开局库 BOOK.DAT | 见 [开局库](opening-book.md) |
+| 使用 NNUE 评估 | 检测到权重时**默认勾选**；无权重时禁用 |
 | 音效 | 走子 / 吃子 / 将军 / 胜负等，与 Win32 一致 |
 
 ## Python API（搜索）

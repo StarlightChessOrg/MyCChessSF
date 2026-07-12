@@ -21,7 +21,7 @@ python scripts/extract_book.py
 
 ## 网页侧栏
 
-勾选 **「小巫师使用开局库」**（侧栏 XQWL 遗留文案）时，**象眸** 搜索优先查库；取消勾选则每步纯 Alpha-Beta，不走库。
+勾选 **「使用开局库 BOOK.DAT」** 时，**象眸 SF** 搜索优先查库；取消勾选则每步纯 Alpha-Beta，不走库。
 
 ## 命令行
 

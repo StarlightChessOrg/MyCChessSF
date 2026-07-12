@@ -29,7 +29,9 @@ from mycchess_sf.xqwl_assets import (
 from mycchess_sf.xqwl_state import REP_RULE_VALUE_DRAWISH_ABS
 
 STRATEGY_HUMAN = "人类"
-STRATEGY_XQWL = "象棋小巫师"
+STRATEGY_XQWL = "象眸 SF"
+BRAND_ZH = "象眸 SF"
+BRAND_EN = "Iris SF"
 STRATEGIES = (STRATEGY_HUMAN, STRATEGY_XQWL)
 AI_THINK_DELAY_SEC = 0.45
 AI_VS_AI_MIN_STEP_SEC = 0.5
@@ -312,7 +314,7 @@ class XqwlWebSession:
         """Handle a click; ``iy`` is board_view row (0=black top, 9=red bottom)."""
         with self._lock:
             if self._ai_busy or self._ai_pending:
-                return {"error": "小巫师思考中"}
+                return {"error": f"{BRAND_ZH} 思考中"}
             side = self.game.get_side()
             strat = self.strategy_red if side == "red" else self.strategy_black
             if strat != STRATEGY_HUMAN:
@@ -385,7 +387,7 @@ class XqwlWebSession:
                 with self._lock:
                     mode = "开局库+搜索" if use_book else "纯搜索"
                     eval_tag = "NNUE" if self._engine.nnue_loaded() else "PST"
-                    self._ai_thinking = f"象棋小巫师思考中（{eval_tag}·{mode}，约 {think_ms} ms）…"
+                    self._ai_thinking = f"{BRAND_ZH} 思考中（{eval_tag}·{mode}，约 {think_ms} ms）…"
                 t0 = time.perf_counter()
                 pos = g_copy.raw_position()
                 detail = dict(engine.search_best_detail(pos, think_ms, use_book))
@@ -396,7 +398,7 @@ class XqwlWebSession:
                     self._ai_busy = False
                     self._ai_pending = False
                     self._ai_thinking = ""
-                    self._toasts.append({"kind": "info", "title": "小巫师错误", "body": str(e)})
+                    self._toasts.append({"kind": "info", "title": f"{BRAND_ZH} 错误", "body": str(e)})
                 return
             if both_ai:
                 pad = AI_VS_AI_MIN_STEP_SEC - elapsed / 1000.0
@@ -421,7 +423,7 @@ class XqwlWebSession:
                     if len(self._think_log) > 200:
                         self._think_log[:] = self._think_log[-120:]
                 if mv not in self._legal_strings():
-                    self._toasts.append({"kind": "info", "title": "小巫师", "body": f"非法着法 {mv}"})
+                    self._toasts.append({"kind": "info", "title": BRAND_ZH, "body": f"非法着法 {mv}"})
                     return
                 self._apply_move(mv, for_ai=True)
             self.maybe_ai()
@@ -436,7 +438,7 @@ def _html_page() -> str:
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>象棋小巫师</title>
+  <title>{BRAND_ZH} · {BRAND_EN}</title>
   <style>
     :root {{
       --bw:{bw}px; --bh:{bh}px; --sq:{sq}px; --edge:{edge}px;
@@ -502,11 +504,11 @@ def _html_page() -> str:
 </head>
 <body>
   <div class="win">
-    <div class="titlebar">象棋小巫师</div>
+    <div class="titlebar">{BRAND_ZH} · {BRAND_EN}</div>
     <div class="layout">
       <div class="think-panel">
         <h2>思考日志</h2>
-        <div class="hint">小巫师每步决策：深度、耗时、行棋方 vl、棋子与坐标</div>
+        <div class="hint">{BRAND_ZH} 每步决策：深度、耗时、行棋方 vl、棋子与坐标</div>
         <div id="think-log-body"></div>
       </div>
       <div class="board-wrap">
@@ -519,11 +521,11 @@ def _html_page() -> str:
       </div>
       <div class="sidepanel">
         <h1>对弈设置</h1>
-        <div class="subtitle">XQWL06 界面 · 默认红方人类、黑方小巫师</div>
+        <div class="subtitle">XQWL06 界面 · 默认红方人类、黑方 {BRAND_ZH}</div>
         <label>红方策略</label><select id="sel-red"></select>
         <label>黑方策略</label><select id="sel-black"></select>
         <div id="book-row" class="check-row"><label><input type="checkbox" id="chk-book" disabled/> 使用开局库 BOOK.DAT</label></div>
-        <div id="nnue-row" class="check-row disabled-row"><label><input type="checkbox" id="chk-nnue" disabled/> 小巫师使用 NNUE 评估</label></div>
+        <div id="nnue-row" class="check-row disabled-row"><label><input type="checkbox" id="chk-nnue" disabled/> 使用 NNUE 评估</label></div>
         <div class="path-info">
           <div class="path-item"><span class="path-label">开局库路径</span><span id="book-path" class="path-val missing">—</span></div>
           <div class="path-item"><span class="path-label">NNUE 权重路径</span><span id="nnue-path" class="path-val missing">—</span></div>
@@ -688,7 +690,7 @@ def _html_page() -> str:
     statusEl.textContent=snap.status_text||"";
     if(aiThinkingEl){{
       if(snap.ai_thinking)aiThinkingEl.textContent=snap.ai_thinking;
-      else if(snap.ai_pending)aiThinkingEl.textContent="小巫师即将应招…";
+      else if(snap.ai_pending)aiThinkingEl.textContent="{BRAND_ZH} 即将应招…";
       else aiThinkingEl.textContent="";
     }}
     renderThinkLog(snap.think_log||[]);
@@ -851,14 +853,14 @@ def main() -> None:
             "缺少 XQWL 界面资源。请运行: python scripts/fetch_xqwl_assets.py"
         )
 
-    p = argparse.ArgumentParser(description="MyCChessSF 网页对弈（象棋小巫师 XQWL06）")
+    p = argparse.ArgumentParser(description=f"{BRAND_ZH} ({BRAND_EN}) 网页对弈")
     p.add_argument("--host", type=str, default="127.0.0.1")
     p.add_argument("--port", type=int, default=5151)
-    p.add_argument("--think-ms", type=int, default=1000, help="小巫师每步思考时间（毫秒）")
+    p.add_argument("--think-ms", type=int, default=1000, help=f"{BRAND_ZH} 每步思考时间（毫秒）")
     p.add_argument("--book", type=Path, default=None, help="开局库 BOOK.DAT（默认 deployment/db/BOOK.DAT）")
     p.add_argument("--no-book-default", action="store_true", help="启动时默认关闭开局库")
     p.add_argument("--nnue", type=Path, default=None, help="NNUE 权重 .xqnnue.bin（默认自动检测，须为 1260 维 XQWL-PSQ）")
-    p.add_argument("--nnue-default", action="store_true", help="启动时默认启用 NNUE（否则使用动态 PST）")
+    p.add_argument("--no-nnue-default", action="store_true", help="启动时默认关闭 NNUE（有权重时仍默认启用）")
     args = p.parse_args()
 
     engine = Engine()
@@ -886,10 +888,11 @@ def main() -> None:
     if nnue_path_str:
         if engine.load_nnue(nnue_path_str):
             nnue_available = True
-            use_nnue = bool(args.nnue_default)
+            use_nnue = not args.no_nnue_default
             if not use_nnue:
                 engine.clear_nnue()
-            print(f"[play] NNUE 可用: {nnue_path_str}", flush=True)
+            state = "默认启用" if use_nnue else "默认关闭"
+            print(f"[play] NNUE 可用: {nnue_path_str}（{state}）", flush=True)
         else:
             print(f"[play] NNUE 文件存在但加载失败: {nnue_path_str}", flush=True)
     else:
@@ -984,7 +987,7 @@ def main() -> None:
         session.maybe_ai()
 
     os.environ.setdefault("SANIC_IGNORE_PRODUCTION_WARNING", "1")
-    print(f"[play] http://{args.host}:{args.port}/  (象棋小巫师 XQWL06)", flush=True)
+    print(f"[play] http://{args.host}:{args.port}/  ({BRAND_ZH} · {BRAND_EN})", flush=True)
     app.run(host=str(args.host), port=int(args.port), single_process=True, access_log=False, motd=False)
 
 
