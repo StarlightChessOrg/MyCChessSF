@@ -120,6 +120,7 @@ class BridgeState:
             raise ValueError(f"Illegal opponent move {token!r} -> {iccs!r}")
         self._game.make_move_iccs(iccs)
         self.computer_move = "null"
+        self._last_opponent_token = token
         print(f"[bridge] opponent -> {iccs}", flush=True)
 
     def submit_opponent_move(self, token: str) -> None:
@@ -129,7 +130,6 @@ class BridgeState:
         with self._lock:
             if token == self._last_opponent_token:
                 return
-            self._last_opponent_token = token
             self._pending_opponent = token
 
     def request_undo(self) -> None:

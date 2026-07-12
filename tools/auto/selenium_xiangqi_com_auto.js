@@ -184,16 +184,26 @@ async function syncWebBoardFromPage(driver) {
 }
 
 function diffBoardMove(before, after) {
-  let from = null
-  let to = null
+  const from = []
+  const to = []
   for (let i = 0; i < 10; i++) {
     for (let j = 0; j < 9; j++) {
-      if (before[i][j] === 1 && after[i][j] === 0) from = { x1: i, y1: j }
-      if (before[i][j] === 0 && after[i][j] === 1) to = { x2: i, y2: j }
+      if (before[i][j] === 1 && after[i][j] === 0) from.push({ x1: i, y1: j })
+      if (before[i][j] === 0 && after[i][j] === 1) to.push({ x2: i, y2: j })
     }
   }
-  if (!from || !to) return null
-  return { x1: from.x1, y1: from.y1, x2: to.x2, y2: to.y2 }
+  if (from.length === 1 && to.length === 1) {
+    return { x1: from[0].x1, y1: from[0].y1, x2: to[0].x2, y2: to[0].y2 }
+  }
+  return null
+}
+
+function moveToBridgeToken(move) {
+  return String(move.x1) + String(move.y1) + String(move.x2) + String(move.y2)
+}
+
+function moveToIccsLabel(move) {
+  return `${move.y1}${move.x1}-${move.y2}${move.x2}`
 }
 
 function isValidMove(move) {
@@ -211,15 +221,30 @@ function isValidMove(move) {
   )
 }
 
-async function waitForOpponentBoard(driver, sinceBoard, timeoutMs = 45000) {
+async function waitForStableOpponentBoard(driver, sinceBoard, timeoutMs = 45000) {
   const since = sinceBoard.toString()
   const deadline = Date.now() + timeoutMs
   console.log("[auto] 等待相弈应手…")
+  let candidate = null
+  let candidateKey = ""
+  let stableSince = 0
   while (Date.now() < deadline) {
     const cur = await readWebBoard(driver)
-    if (cur.toString() !== since) return cur
-    await sleep(250)
+    const key = cur.toString()
+    if (key === since) {
+      candidate = null
+      candidateKey = ""
+      stableSince = 0
+    } else if (key === candidateKey) {
+      if (Date.now() - stableSince >= 700) return candidate
+    } else {
+      candidate = cur
+      candidateKey = key
+      stableSince = Date.now()
+    }
+    await sleep(200)
   }
+  if (candidate) return candidate
   throw new Error("等待相弈应手超时")
 }
 
@@ -243,10 +268,13 @@ async function waitForBridgeEngineMove(prevToken, timeoutMs = 90000) {
 }
 
 async function resolveOpponentMove(driver, before, after) {
-  const diff = diffBoardMove(before, after)
-  if (isValidMove(diff)) return diff
-  const legacy = await getWebMove(driver, before, after)
-  if (isValidMove(legacy)) return legacy
+  const move = await getWebMove(driver, before, after)
+  if (isValidMove(move)) {
+    console.log(
+      `[auto] 解着 ICCS ${moveToIccsLabel(move)}  bridge ${moveToBridgeToken(move)}`
+    )
+    return move
+  }
   return null
 }
 
@@ -666,7 +694,7 @@ async function getEngineMove(driver) {
     const boardAfterEngine = webLastBoard
     let boardAfterOpponent
     try {
-      boardAfterOpponent = await waitForOpponentBoard(driver, boardAfterEngine)
+      boardAfterOpponent = await waitForStableOpponentBoard(driver, boardAfterEngine)
     } catch (err) {
       console.error("[auto]", err.message || err)
       webLastBoard = await readWebBoard(driver)
@@ -791,64 +819,62 @@ async function getWebBoard(driver) {
   return currentBoard
 }
 
-async function getWebMove(_driver, lastBoard, currentBoard) {
-  const diff = diffBoardMove(lastBoard, currentBoard)
-  if (isValidMove(diff)) return diff
+async function getWebMove(driver, lastBoard, currentBoard) {
+  const strict = diffBoardMove(lastBoard, currentBoard)
+  if (isValidMove(strict)) return strict
 
-  const move = { x1: -1, y1: -1, x2: -1, y2: -1 }
-  for (let i = 0; i < lastBoard.length; i++) {
-    for (let j = 0; j < lastBoard[i].length; j++) {
-      if (lastBoard[i][j] === 1 && currentBoard[i][j] === 0) {
-        move.x1 = i
-        move.y1 = j
+  const fromSquares = []
+  const toSquares = []
+  for (let i = 0; i < 10; i++) {
+    for (let j = 0; j < 9; j++) {
+      if (lastBoard[i][j] === 1 && currentBoard[i][j] === 0) fromSquares.push({ x1: i, y1: j })
+      if (lastBoard[i][j] === 0 && currentBoard[i][j] === 1) toSquares.push({ x2: i, y2: j })
+    }
+  }
+  if (fromSquares.length !== 1) return null
+
+  const move = { x1: fromSquares[0].x1, y1: fromSquares[0].y1, x2: -1, y2: -1 }
+
+  if (toSquares.length === 1) {
+    move.x2 = toSquares[0].x2
+    move.y2 = toSquares[0].y2
+    return isValidMove(move) ? move : null
+  }
+
+  try {
+    const metrics = await getGridMetrics(driver)
+    const elements = await driver.findElements(By.css(".pieces-container [r]"))
+    for (const el of elements) {
+      try {
+        const child = await el.findElement(By.css(":scope > div > div > div"))
+        const cls = await child.getAttribute("class")
+        if (!cls || !cls.includes("moved-piece")) continue
+        const { row, col } = await rectToGridCell(driver, el, metrics)
+        move.x2 = row - 1
+        move.y2 = col - 1
+        console.log(`[auto] moved-piece 落点 grid (${row},${col})`)
+        return isValidMove(move) ? move : null
+      } catch {
+        continue
       }
     }
+  } catch {
+    /* ignore */
   }
-  const elements = await _driver.findElements(By.css(".pieces-container > div[r]"))
-  let moved = { x: -1, index: -1 }
-  const pieces = []
-  for (const el of elements) {
-    let elChild
-    try {
-      elChild = await el.findElement(By.css(":scope > div > div > div"))
-    } catch {
-      continue
-    }
-    const rowNum = 11 - Number(await el.getAttribute("r"))
-    pieces[rowNum] = pieces[rowNum] || []
-    pieces[rowNum].push(el)
-    const cls = await elChild.getAttribute("class")
-    if (cls && cls.includes("moved-piece")) {
-      moved.x = rowNum
-      moved.index = pieces[rowNum].length - 1
-    }
-  }
-  if (moved.x < 1) return move
-  move.x2 = moved.x - 1
-  let count = 0
-  for (const k in currentBoard[moved.x - 1]) {
-    if (currentBoard[moved.x - 1][k] === 1) {
-      if (count === moved.index) {
-        move.y2 = Number(k)
-        break
-      }
-      count++
-    }
-  }
-  return move
+
+  return null
 }
 
 async function sendOpponentMove(move) {
-  // move.x* = 网页行(0–9)=ICCS y；move.y* = 网页列(0–8)=ICCS x
-  const moveString =
-    String(move.x1) + String(move.y1) + String(move.x2) + String(move.y2)
-  if (moveString.includes("-")) {
+  const moveString = moveToBridgeToken(move)
+  if (moveString.includes("-") || moveString.length !== 4) {
     console.error("[auto] 非法着法坐标", moveString)
-    return
+    return false
   }
-  console.log("[auto] 回传桥接", moveString)
+  console.log(`[auto] 回传桥接 ${moveString} (ICCS ${moveToIccsLabel(move)})`)
   await httpNotify(`/move?playermove=${moveString}`)
   await sleep(300)
+  return true
 }
 
 async function initDriver() {
