@@ -242,11 +242,29 @@ async function dispatchPointerClick(driver, el) {
   )
 }
 
-/** bridge4 y1x1y2x2 → 相弈 DOM：grid 行 10-x，列 y+1；棋子属性 r=x+1, c=y+1 */
-function bridgeToSite(x1, y1, x2, y2) {
+/** bridge4 y1x1y2x2（ICCS 的 y=行、x=列）→ 相弈 DOM */
+function bridgeToSite(iccsX1, iccsY1, iccsX2, iccsY2) {
+  const fromRow = iccsY1 + 1
+  const fromCol = iccsX1 + 1
+  const toRow = iccsY2 + 1
+  const toCol = iccsX2 + 1
   return {
-    from: { iccsX: x1, iccsY: y1, gridRow: 10 - x1, gridCol: y1 + 1, r: x1 + 1, c: y1 + 1 },
-    to: { iccsX: x2, iccsY: y2, gridRow: 10 - x2, gridCol: y2 + 1, r: x2 + 1, c: y2 + 1 },
+    from: {
+      iccsX: iccsX1,
+      iccsY: iccsY1,
+      gridRow: fromRow,
+      gridCol: fromCol,
+      r: 11 - fromRow,
+      c: fromCol,
+    },
+    to: {
+      iccsX: iccsX2,
+      iccsY: iccsY2,
+      gridRow: toRow,
+      gridCol: toCol,
+      r: 11 - toRow,
+      c: toCol,
+    },
   }
 }
 
@@ -391,10 +409,16 @@ async function openXiangqiGame(driver) {
 }
 
 async function isEndGame(driver) {
-  const elements = await driver.findElements(By.css(".game-end-widget"))
-  if (elements.length > 0) {
-    console.log("[auto] 对局结束")
-    process.exit(0)
+  try {
+    const elements = await driver.findElements(By.css(".game-end-widget"))
+    if (elements.length > 0) {
+      console.log("[auto] 对局结束")
+      process.exit(0)
+    }
+  } catch (err) {
+    if (/no such window|web view not found/i.test(String(err.message || err))) {
+      throw err
+    }
   }
 }
 
@@ -442,22 +466,22 @@ async function getEngineMove(driver) {
 
 async function doMoveOnWeb(driver, attempt = 0) {
   const MAX_ATTEMPTS = 8
-  const x1 = Number(engineLastMove.charAt(1))
-  const y1 = Number(engineLastMove.charAt(0))
-  const x2 = Number(engineLastMove.charAt(3))
-  const y2 = Number(engineLastMove.charAt(2))
-  const { from, to } = bridgeToSite(x1, y1, x2, y2)
+  const iccsY1 = Number(engineLastMove.charAt(0))
+  const iccsX1 = Number(engineLastMove.charAt(1))
+  const iccsY2 = Number(engineLastMove.charAt(2))
+  const iccsX2 = Number(engineLastMove.charAt(3))
+  const { from, to } = bridgeToSite(iccsX1, iccsY1, iccsX2, iccsY2)
 
   console.log(
-    `[auto] 网页走子 ICCS (${x1},${y1})->(${x2},${y2})  grid (${from.gridRow},${from.gridCol})->(${to.gridRow},${to.gridCol})  r/c (${from.r},${from.c})->(${to.r},${to.c})  bridge=${engineLastMove} attempt=${attempt + 1}`
+    `[auto] 网页走子 ICCS (${iccsX1},${iccsY1})->(${iccsX2},${iccsY2})  grid (${from.gridRow},${from.gridCol})->(${to.gridRow},${to.gridCol})  r/c (${from.r},${from.c})->(${to.r},${to.c})  bridge=${engineLastMove} attempt=${attempt + 1}`
   )
 
   if (attempt >= MAX_ATTEMPTS) {
     throw new Error(`网页走子失败已达 ${MAX_ATTEMPTS} 次: ${engineLastMove}`)
   }
 
-  webLastBoard[9 - x1][y1] = 0
-  webLastBoard[9 - x2][y2] = 1
+  webLastBoard[iccsY1][iccsX1] = 0
+  webLastBoard[iccsY2][iccsX2] = 1
 
   let start
   let end
@@ -465,8 +489,8 @@ async function doMoveOnWeb(driver, attempt = 0) {
     start = await findMoveTarget(driver, from, true)
     end = await findMoveTarget(driver, to, false)
   } catch (err) {
-    webLastBoard[9 - x1][y1] = 1
-    webLastBoard[9 - x2][y2] = 0
+    webLastBoard[iccsY1][iccsX1] = 1
+    webLastBoard[iccsY2][iccsX2] = 0
     console.error("[auto] 定位格子失败:", err.message || err)
     await sleep(500)
     return doMoveOnWeb(driver, attempt + 1)
@@ -489,8 +513,8 @@ async function doMoveOnWeb(driver, attempt = 0) {
   await sleep(400)
 
   if ((await readWebBoard(driver)).toString() !== webLastBoard.toString()) {
-    webLastBoard[9 - x1][y1] = 1
-    webLastBoard[9 - x2][y2] = 0
+    webLastBoard[iccsY1][iccsX1] = 1
+    webLastBoard[iccsY2][iccsX2] = 0
     console.error("[auto] 网页着法失败，重试")
     await sleep(400)
     return doMoveOnWeb(driver, attempt + 1)
@@ -577,11 +601,9 @@ async function getWebMove(_driver, lastBoard, currentBoard) {
 }
 
 async function sendOpponentMove(move) {
-  const x1 = String(9 - move.x1)
-  const y1 = String(move.y1)
-  const x2 = String(9 - move.x2)
-  const y2 = String(move.y2)
-  const moveString = y1 + x1 + y2 + x2
+  // move.x* = 网页行(0–9)=ICCS y；move.y* = 网页列(0–8)=ICCS x
+  const moveString =
+    String(move.x1) + String(move.y1) + String(move.x2) + String(move.y2)
   if (moveString.includes("-")) {
     console.error("[auto] 非法着法坐标", moveString)
     return
@@ -603,6 +625,7 @@ async function initDriver() {
     "--no-default-browser-check",
     "--remote-allow-origins=*",
     "--start-maximized",
+    "--disable-session-crashed-bubble",
   ]
   if (USE_SYSTEM_EDGE_PROFILE) {
     args.push("--profile-directory=Default")
