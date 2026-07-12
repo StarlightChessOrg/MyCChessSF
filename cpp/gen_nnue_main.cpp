@@ -12,6 +12,8 @@
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
+#include <climits>
+#include <libgen.h>
 #include <vector>
 
 #define XQWL_NO_BOOK_LOADER
@@ -50,7 +52,8 @@ void usage(const char *prog) {
                "  --jobs N               Parallel workers (0 = CPU cores, default: 0)\n"
                "  --random-pct PCT       Random move probability 0-100 (default: 20)\n"
                "  --chunk-size N         Positions per chunk file (default: 2000)\n"
-               "  --nnue PATH            NNUE weights (.xqnnue.bin); auto-detect if omitted\n"
+               "  --nnue PATH            NNUE weights (.xqnnue.bin); default: auto-detect "
+               "data/nnue_model/\n"
                "  --pst-only             Force PST eval even when NNUE weights exist\n",
                prog);
 }
@@ -63,16 +66,63 @@ bool file_exists(const std::string &path) {
   return f.good();
 }
 
+std::string join_path(const std::string &base, const std::string &rel) {
+  if (base.empty()) {
+    return rel;
+  }
+  if (base.back() == '/') {
+    return base + rel;
+  }
+  return base + "/" + rel;
+}
+
+std::string executable_dir() {
+  char link[PATH_MAX];
+  const ssize_t n = ::readlink("/proc/self/exe", link, sizeof(link) - 1);
+  if (n <= 0) {
+    return {};
+  }
+  link[n] = '\0';
+  std::string path(link);
+  const std::size_t slash = path.find_last_of('/');
+  if (slash == std::string::npos) {
+    return {};
+  }
+  return path.substr(0, slash);
+}
+
+void append_nnue_candidates(std::vector<std::string> &out, const std::string &base,
+                            const char *const *rels) {
+  for (const char *const *p = rels; *p != nullptr; ++p) {
+    out.push_back(base.empty() ? std::string(*p) : join_path(base, *p));
+  }
+}
+
 std::string auto_detect_nnue_path() {
-  static const char *candidates[] = {
+  static const char *kRelFromRoot[] = {
+      "data/nnue_model/quantized.xqnnue.bin",
+      "deployment/model/quantized.xqnnue.bin",
       "nnue_qINT8/output/quantized.xqnnue.bin",
-      "deployment/nnue/quantized.xqnnue.bin",
       "quantized.xqnnue.bin",
       nullptr,
   };
-  for (const char **p = candidates; *p != nullptr; ++p) {
-    if (file_exists(*p)) {
-      return *p;
+  static const char *kRelFromDeployBin[] = {
+      "../../data/nnue_model/quantized.xqnnue.bin",
+      "../model/quantized.xqnnue.bin",
+      "../../deployment/model/quantized.xqnnue.bin",
+      nullptr,
+  };
+
+  std::vector<std::string> candidates;
+  append_nnue_candidates(candidates, "", kRelFromRoot);
+  const std::string exe_dir = executable_dir();
+  if (!exe_dir.empty()) {
+    append_nnue_candidates(candidates, exe_dir, kRelFromDeployBin);
+  }
+
+  for (const std::string &path : candidates) {
+    if (file_exists(path)) {
+      return path;
     }
   }
   return {};
@@ -446,7 +496,8 @@ int main(int argc, char **argv) {
                cfg.output_dir.c_str(), cfg.max_positions, jobs, cfg.think_ms, cfg.max_depth, cfg.random_pct,
                static_cast<long long>(cfg.chunk_size));
   if (cfg.nnue_path.empty()) {
-    std::fprintf(stderr, "[xqwl_gen_nnue] eval=PST (no NNUE weights found; use --nnue PATH or --pst-only)\n");
+    std::fprintf(stderr, "[xqwl_gen_nnue] eval=PST (no NNUE weights found; use --nnue PATH or "
+                         "place weights in data/nnue_model/)\n");
   } else {
     std::fprintf(stderr, "[xqwl_gen_nnue] eval=NNUE (%s)\n", cfg.nnue_path.c_str());
   }

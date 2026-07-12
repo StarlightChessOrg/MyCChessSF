@@ -27,10 +27,10 @@ Windows PowerShell：
 Copy-Item nnue_qINT8\output\quantized.xqnnue.bin data\nnue_model\
 ```
 
-## 部署
+## 部署与搜索
 
-`bash scripts/build_linux.sh` 会将本目录下所有 `*.xqnnue.bin` 复制到 **`deployment/model/`**。
+`bash scripts/build_linux.sh` 会将本目录下所有 `*.xqnnue.bin` 复制到 **`deployment/model/`**（发布包内路径）。
 
-网页对弈与 `xqwl_gen_nnue` 会优先查找 `deployment/model/quantized.xqnnue.bin`。
+**权重迭代默认源**：`xqwl_gen_nnue` 与网页对弈均**优先**加载本目录的 `quantized.xqnnue.bin`；从 `deployment/bin/` 运行时亦会回退查找 `../model/`。量化完成后请更新此目录再生成下一轮 `nnue_data`。
 
 `*.bin` / `*.pt` 体积较大，默认 **不入库**（见根目录 `.gitignore`）。
