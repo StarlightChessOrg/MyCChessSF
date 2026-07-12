@@ -1,10 +1,9 @@
-// MyCChessSF INT8 NNUE: dual-perspective FT accumulators, SIMD, mate-aware scoring.
+// MyCChessSF INT8 NNUE: single-perspective FT accumulator + SIMD inference.
 //
-// Dual accumulator (NOT dual scoring):
-//   acc[0] / acc[1] hold FT int32 sums under virtual_stm=0 (red) / 1 (black).
-//   Feature indices depend on perspective; after MakeMove sdPlayer flips, so we
-//   keep both FT states incrementally and evaluate with acc[pos.sdPlayer] only.
-//   FC forward runs once per eval — never two final scores.
+// acc[pos.sdPlayer] is maintained incrementally along the search tree.
+// Each move updates only the post-move perspective (1 - sdPlayer before move).
+// acc_valid[] tracks freshness; stale perspectives refresh once before delta apply.
+// FC forward runs once per eval.
 #ifndef XQWL_NNUE_INC
 #define XQWL_NNUE_INC
 
@@ -124,10 +123,11 @@ struct Weights {
 };
 
 struct AccDelta {
-  std::int8_t n_rem[2]{};
-  std::int8_t n_add[2]{};
-  std::int16_t rem[2][kMaxDelta]{};
-  std::int16_t add[2][kMaxDelta]{};
+  std::int8_t persp = 0;
+  std::int8_t n_rem = 0;
+  std::int8_t n_add = 0;
+  std::int16_t rem[kMaxDelta]{};
+  std::int16_t add[kMaxDelta]{};
 };
 
 struct SearchState {
@@ -136,6 +136,7 @@ struct SearchState {
   int stack_top = 0;
   int l1 = 0;
   bool ready = false;
+  bool acc_valid[2] = {false, false};
 };
 
 struct Runtime {
@@ -267,9 +268,10 @@ struct Runtime {
   void acc_init(SearchState &st, const PositionStruct &pos) const {
     st.stack_top = 0;
     st.l1 = w.l1;
-    // Both FT views: cheap incremental updates on MakeMove; eval uses acc[sdPlayer] only.
-    acc_refresh_perspective(st, 0, pos);
-    acc_refresh_perspective(st, 1, pos);
+    st.acc_valid[0] = false;
+    st.acc_valid[1] = false;
+    acc_refresh_perspective(st, pos.sdPlayer, pos);
+    st.acc_valid[pos.sdPlayer] = true;
     st.ready = true;
   }
 
@@ -294,28 +296,32 @@ struct Runtime {
     const int sq_dst = mv >> 8;
     const BYTE pc = pos.ucpcSquares[sq_src];
     const BYTE cap = pos.ucpcSquares[sq_dst];
+    const int persp = 1 - pos.sdPlayer;
+    d.persp = static_cast<std::int8_t>(persp);
 
-    for (int persp = 0; persp < 2; ++persp) {
-      // Update both FT encodings; only acc[sdPlayer] is read at eval time.
-      d.n_rem[persp] = 0;
-      d.n_add[persp] = 0;
-      const int f_src = feature_from_sq_pc(sq_src, pc, persp);
-      if (f_src >= 0) {
-        d.rem[persp][d.n_rem[persp]++] = static_cast<std::int16_t>(f_src);
-      }
-      if (cap) {
-        const int f_cap = feature_from_sq_pc(sq_dst, cap, persp);
-        if (f_cap >= 0) {
-          d.rem[persp][d.n_rem[persp]++] = static_cast<std::int16_t>(f_cap);
-        }
-      }
-      const int f_dst = feature_from_sq_pc(sq_dst, pc, persp);
-      if (f_dst >= 0) {
-        d.add[persp][d.n_add[persp]++] = static_cast<std::int16_t>(f_dst);
-      }
-      acc_apply_column_delta(st, persp, d.rem[persp], d.n_rem[persp], -1);
-      acc_apply_column_delta(st, persp, d.add[persp], d.n_add[persp], +1);
+    d.n_rem = 0;
+    d.n_add = 0;
+    const int f_src = feature_from_sq_pc(sq_src, pc, persp);
+    if (f_src >= 0) {
+      d.rem[d.n_rem++] = static_cast<std::int16_t>(f_src);
     }
+    if (cap) {
+      const int f_cap = feature_from_sq_pc(sq_dst, cap, persp);
+      if (f_cap >= 0) {
+        d.rem[d.n_rem++] = static_cast<std::int16_t>(f_cap);
+      }
+    }
+    const int f_dst = feature_from_sq_pc(sq_dst, pc, persp);
+    if (f_dst >= 0) {
+      d.add[d.n_add++] = static_cast<std::int16_t>(f_dst);
+    }
+    if (!st.acc_valid[persp]) {
+      acc_refresh_perspective(st, persp, pos);
+      st.acc_valid[persp] = true;
+    }
+    acc_apply_column_delta(st, persp, d.rem, d.n_rem, -1);
+    acc_apply_column_delta(st, persp, d.add, d.n_add, +1);
+    st.acc_valid[1 - persp] = false;
   }
 
   void acc_undo(SearchState &st) const {
@@ -323,10 +329,11 @@ struct Runtime {
       return;
     }
     AccDelta &d = st.stack[--st.stack_top];
-    for (int persp = 0; persp < 2; ++persp) {
-      acc_apply_column_delta(st, persp, d.add[persp], d.n_add[persp], -1);
-      acc_apply_column_delta(st, persp, d.rem[persp], d.n_rem[persp], +1);
-    }
+    const int persp = d.persp;
+    acc_apply_column_delta(st, persp, d.add, d.n_add, -1);
+    acc_apply_column_delta(st, persp, d.rem, d.n_rem, +1);
+    st.acc_valid[persp] = true;
+    st.acc_valid[1 - persp] = true;
   }
 
   static float clipped_relu(float x, float max_val) {

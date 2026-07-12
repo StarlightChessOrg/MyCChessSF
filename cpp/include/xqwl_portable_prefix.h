@@ -48,6 +48,7 @@ const int HASH_SIZE = 1 << 20;
 const int HASH_ALPHA = 1;
 const int HASH_BETA = 2;
 const int HASH_PV = 3;
+constexpr short HASH_EVAL_NONE = static_cast<short>(-32768);
 const int ASPIRATION_DELTA_INIT = 16;
 const int ASPIRATION_DELTA_MAX = 200;
 const int ASPIRATION_MAX_FAILS = 6;
