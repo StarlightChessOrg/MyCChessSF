@@ -212,6 +212,10 @@ third_party/halfka_tables
 # Local test checkpoints (large binaries)
 tmps/*.pt
 
+# Canonical INT8 NNUE deploy artifacts (copy from nnue_qINT8/output after quantize)
+data/nnue_model/*.bin
+data/nnue_model/*.pt
+
 # Built Python extension (platform-specific)
 /xqwlight_core*.pyd
 /xqwlight_core*.so

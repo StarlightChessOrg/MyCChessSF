@@ -815,12 +815,14 @@ def _default_book_path() -> Path | None:
 def _default_nnue_path() -> Path | None:
     root = Path(__file__).resolve().parent.parent
     candidates = [
+        root / "deployment" / "model" / "quantized.xqnnue.bin",
+        Path.cwd() / "deployment" / "model" / "quantized.xqnnue.bin",
+        root / "data" / "nnue_model" / "quantized.xqnnue.bin",
+        Path.cwd() / "data" / "nnue_model" / "quantized.xqnnue.bin",
         root / "nnue_qINT8" / "output" / "quantized.xqnnue.bin",
-        root / "deployment" / "nnue" / "quantized.xqnnue.bin",
         Path.cwd() / "nnue_qINT8" / "output" / "quantized.xqnnue.bin",
+        root / "deployment" / "nnue" / "quantized.xqnnue.bin",
         Path.cwd() / "deployment" / "nnue" / "quantized.xqnnue.bin",
-        root / "quantized.xqnnue.bin",
-        Path.cwd() / "quantized.xqnnue.bin",
     ]
     for p in candidates:
         if p.is_file():

@@ -8,6 +8,8 @@ DEPLOY="$ROOT/deployment"
 DEPLOY_BIN="$DEPLOY/bin"
 DEPLOY_LIB="$DEPLOY/lib"
 DEPLOY_DB="$DEPLOY/db"
+DEPLOY_MODEL="$DEPLOY/model"
+NNUE_SRC="$ROOT/data/nnue_model"
 
 # WSL + DrvFS (/mnt/c, …): Windows host clock can be ahead of Linux, so CMake-
 # generated Makefiles look "in the future" and gmake warns about clock skew.
@@ -65,7 +67,7 @@ fi
 
 echo "[build] Packing deployment/ ..."
 rm -rf "$DEPLOY"
-mkdir -p "$DEPLOY_BIN" "$DEPLOY_LIB" "$DEPLOY_DB"
+mkdir -p "$DEPLOY_BIN" "$DEPLOY_LIB" "$DEPLOY_DB" "$DEPLOY_MODEL"
 cp -f "$ROOT/$SO_NAME" "$DEPLOY_LIB/"
 rm -rf "$DEPLOY_LIB/mycchess_sf"
 cp -a "$ROOT/mycchess_sf" "$DEPLOY_LIB/mycchess_sf"
@@ -82,6 +84,12 @@ if [[ ! -f data/compressed_files/book.7z ]]; then
   exit 1
 fi
 "$PYTHON" scripts/extract_book.py --archive data/compressed_files/book.7z --output-dir "$DEPLOY_DB"
+if compgen -G "$NNUE_SRC/*.xqnnue.bin" > /dev/null; then
+  cp -f "$NNUE_SRC"/*.xqnnue.bin "$DEPLOY_MODEL/"
+  echo "[build]   model/ -> $(basename -a "$NNUE_SRC"/*.xqnnue.bin | tr '\n' ' ')"
+else
+  echo "[build]   model/ -> (empty; add data/nnue_model/*.xqnnue.bin for NNUE eval)"
+fi
 cp -f scripts/deployment_README.md "$DEPLOY/README.md"
 
 "$PYTHON" -m pip install -q -e .
@@ -94,6 +102,9 @@ else
   echo "[build]   bin/  -> mycchess-play-web"
 fi
 echo "[build]   db/   -> BOOK.DAT"
+if compgen -G "$DEPLOY_MODEL/*.xqnnue.bin" > /dev/null; then
+  echo "[build]   model/ -> NNUE weights"
+fi
 echo "[build] Web play: pip install -r $DEPLOY/requirements.txt && $DEPLOY_BIN/mycchess-play-web --host 0.0.0.0 --port 5151"
 if [[ -n "$GEN_NAME" ]]; then
   echo "[build] NNUE data gen: $DEPLOY_BIN/xqwl_gen_nnue --output-dir nnue_data"

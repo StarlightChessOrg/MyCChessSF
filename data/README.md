@@ -1,6 +1,6 @@
 # 数据资产
 
-本目录仅包含 **`compressed_files/`**（压缩包）与本说明文件。运行时解压产物（如 `BOOK.DAT`）不存放在此处，由构建脚本写入 **`deployment/`**。
+本目录包含 **`compressed_files/`**（压缩包）、**`nnue_model/`**（INT8 NNUE 部署源）与本说明。运行时解压产物（如 `BOOK.DAT`）不存放在 `compressed_files/`，由构建脚本写入 **`deployment/`**。
 
 ## compressed_files/
 
@@ -25,3 +25,7 @@ python scripts/extract_book.py
 ```
 
 详细用法见 [docs/opening-book.md](../docs/opening-book.md)。
+
+## nnue_model/
+
+存放 INT8 量化后的 NNUE 权重（`quantized.xqnnue.bin` 等）。`bash scripts/build_linux.sh` 会将其复制到 **`deployment/model/`**。详见 [nnue_model/README.md](nnue_model/README.md)。

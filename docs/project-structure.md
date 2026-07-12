@@ -24,8 +24,9 @@ MyCChessSF/
 │   └── ...
 ├── data/
 │   ├── README.md
-│   └── compressed_files/         开局库与 openbook 压缩包（构建时解压 book.7z）
-├── deployment/                   build_linux.sh 产出（lib/ + bin/ + db/ + requirements.txt）
+│   ├── compressed_files/         开局库与 openbook 压缩包（构建时解压 book.7z）
+│   └── nnue_model/               INT8 NNUE 权重（打包源 → deployment/model/）
+├── deployment/                   build_linux.sh 产出（lib/ + bin/ + db/ + model/ + requirements.txt）
 ├── nnue_data/                    xqwl_gen_nnue 输出（FEN\tvl，通常不入库）
 ├── nnue_training/                浮点 NNUE PyTorch 训练
 ├── nnue_qINT8/                   INT8 量化 + .xqnnue.bin 导出

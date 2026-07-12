@@ -14,8 +14,10 @@ deployment/
 ├── bin/
 │   ├── mycchess-play-web      网页对弈启动脚本
 │   └── xqwl_gen_nnue          NNUE 训练数据生成器
-└── db/
-    └── BOOK.DAT               开局库
+├── db/
+│   └── BOOK.DAT               开局库
+└── model/
+    └── quantized.xqnnue.bin   INT8 NNUE 权重（来自 data/nnue_model/）
 ```
 
 ## 网页对弈（人类 vs 小巫师）
@@ -44,6 +46,7 @@ import xqwlight_core as xc
 
 engine = xc.Engine()
 engine.load_book("deployment/db/BOOK.DAT")
+engine.load_nnue("deployment/model/quantized.xqnnue.bin")
 ```
 
 ## NNUE 数据生成

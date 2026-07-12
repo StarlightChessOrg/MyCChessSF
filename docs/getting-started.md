@@ -42,6 +42,7 @@ bash scripts/build_linux.sh
 | `deployment/lib/` | `xqwlight_core*.so` + `mycchess_sf/`（网页对弈） |
 | `deployment/bin/` | `mycchess-play-web`、`xqwl_gen_nnue` |
 | `deployment/db/BOOK.DAT` | 开局库 |
+| `deployment/model/` | INT8 NNUE（来自 `data/nnue_model/`） |
 | `deployment/requirements.txt` | 对弈服务 Python 依赖 |
 | `deployment/README.md` | 部署说明 |
 
