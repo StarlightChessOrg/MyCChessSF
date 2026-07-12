@@ -1,0 +1,2 @@
+# Shell scripts must use LF (WSL/Linux); CRLF breaks shebang on DrvFS mounts.
+*.sh text eol=lf

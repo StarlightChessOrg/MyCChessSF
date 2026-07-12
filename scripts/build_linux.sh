@@ -19,6 +19,15 @@ sync_build_timestamps() {
   find "$dir" -type f -exec touch {} + 2>/dev/null || true
 }
 
+# Windows checkouts may store CRLF; strip before deployment launchers run under WSL.
+strip_crlf() {
+  local f
+  for f in "$@"; do
+    [[ -f "$f" ]] || continue
+    sed -i 's/\r$//' "$f" 2>/dev/null || sed -i '' 's/\r$//' "$f"
+  done
+}
+
 echo "[build] Python: $PYTHON"
 echo "[build] CXXOPT: $CXXOPT"
 "$PYTHON" -m pip install -q -U pip
@@ -73,9 +82,9 @@ rm -rf "$DEPLOY_LIB/mycchess_sf"
 cp -a "$ROOT/mycchess_sf" "$DEPLOY_LIB/mycchess_sf"
 find "$DEPLOY_LIB/mycchess_sf" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 cp -f scripts/deployment_play_web.sh "$DEPLOY_BIN/mycchess-play-web"
-chmod +x "$DEPLOY_BIN/mycchess-play-web"
 cp -f scripts/deployment_xiangqi_bridge.sh "$DEPLOY_BIN/mycchess-xiangqi-bridge"
-chmod +x "$DEPLOY_BIN/mycchess-xiangqi-bridge"
+strip_crlf "$DEPLOY_BIN/mycchess-play-web" "$DEPLOY_BIN/mycchess-xiangqi-bridge"
+chmod +x "$DEPLOY_BIN/mycchess-play-web" "$DEPLOY_BIN/mycchess-xiangqi-bridge"
 mkdir -p "$DEPLOY/tools"
 cp -a "$ROOT/tools/auto" "$DEPLOY/tools/auto"
 find "$DEPLOY/tools/auto" -type d -name node_modules -exec rm -rf {} + 2>/dev/null || true
