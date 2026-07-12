@@ -18,7 +18,6 @@ dev = ["pytest>=7.0"]
 
 [project.scripts]
 mycchess-play-web = "mycchess_sf.play_web:main"
-mycchess-xiangqi-bridge = "mycchess_sf.xiangqi_auto_bridge:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

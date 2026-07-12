@@ -24,4 +24,3 @@
 ## 开发
 
 - [开发与限制](development.md)
-- [相弈象棋自动对弈测试](../tools/auto/README.md) — Selenium + `:9494` 桥，指定等级 bot 回归
