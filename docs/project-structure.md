@@ -44,7 +44,7 @@ MyCChessSF/
 |------|------|
 | `xqwlight_core.so` | 局面、走法、PST、`Engine.search_*`、NNUE 加载与评估 |
 | `xqwl_gen_nnue` | 多进程 fork 采样 FEN + 根节点搜索分 |
-| `nnue_training/` | HalfKAv2_hm 特征、EmbeddingBag + FC 头、拟合搜索分 |
+| `nnue_training/` | XQWL-PSQ 特征、EmbeddingBag + FC 头、拟合搜索分 |
 | `nnue_qINT8/` | 对称 INT8 量化、校准 input scale、导出二进制权重 |
 | `mycchess_sf/play_web.py` | 浏览器对弈前端 + Sanic 后端 |
 
@@ -55,4 +55,4 @@ MyCChessSF/
 | MyCChessRL | XQWL 局面核 | PyTorch / MCTS |
 | **MyCChessSF** | 同上 | **原版小巫师 Alpha-Beta + 开局库 + 可选 NNUE** |
 
-MyCChessSF 的 NNUE 训练特征采用 **Pikafish HalfKAv2_hm**（16536 维）；调研笔记见 [NNUE 架构调研（Pikafish）](nnue_pikafish_research.md)。
+MyCChessSF 的 NNUE 训练特征采用 **XQWL-PSQ**（1260 维）；Pikafish HalfKA 调研见 [NNUE 架构调研（Pikafish）](nnue_pikafish_research.md)（仅供参考，当前管线未启用）。

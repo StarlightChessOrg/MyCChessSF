@@ -859,8 +859,8 @@ def main() -> None:
     p.add_argument("--think-ms", type=int, default=1000, help="小巫师每步思考时间（毫秒）")
     p.add_argument("--book", type=Path, default=None, help="开局库 BOOK.DAT（默认 deployment/db/BOOK.DAT）")
     p.add_argument("--no-book-default", action="store_true", help="启动时默认关闭开局库")
-    p.add_argument("--nnue", type=Path, default=None, help="NNUE 权重 .xqnnue.bin（默认自动检测）")
-    p.add_argument("--no-nnue-default", action="store_true", help="启动时默认关闭 NNUE（仍显示路径）")
+    p.add_argument("--nnue", type=Path, default=None, help="NNUE 权重 .xqnnue.bin（默认自动检测，须为 1260 维 XQWL-PSQ）")
+    p.add_argument("--nnue-default", action="store_true", help="启动时默认启用 NNUE（否则使用动态 PST）")
     args = p.parse_args()
 
     engine = Engine()
@@ -888,7 +888,7 @@ def main() -> None:
     if nnue_path_str:
         if engine.load_nnue(nnue_path_str):
             nnue_available = True
-            use_nnue = not args.no_nnue_default
+            use_nnue = bool(args.nnue_default)
             if not use_nnue:
                 engine.clear_nnue()
             print(f"[play] NNUE 可用: {nnue_path_str}", flush=True)

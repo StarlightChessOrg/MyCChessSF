@@ -1,6 +1,8 @@
 # INT8 NNUE 模型（部署源）
 
-本目录存放 **量化后的 NNUE 权重**，供 `scripts/build_linux.sh` 打包进部署包。
+本目录存放 **量化后的 NNUE 权重**（**XQWL-PSQ，1260 维**），供 `scripts/build_linux.sh` 打包进部署包。
+
+> 若 `quantized.xqnnue.bin` 为旧版 HalfKA（16536 维），C++ 会拒绝加载；请重新训练/量化，或关闭网页对弈中的「NNUE 评估」改用动态 PST。
 
 ## 文件
 

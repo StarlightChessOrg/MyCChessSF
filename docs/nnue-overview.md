@@ -25,7 +25,7 @@ xqwl_gen_nnue          nnue_training/           nnue_qINT8/              cpp/
 
 | 项目 | 值 |
 |------|-----|
-| 特征 | HalfKAv2_hm，16536 维稀疏（帅位 + 攻击分桶 + 中轴镜像） |
+| 特征 | XQWL-PSQ，1260 维稀疏（己方/对方 × 7 子力 × 90 格） |
 | 结构 | FT（EmbeddingBag）→ L1=512 → FC 512→32 → FC 64→32 → FC 64→1 |
 | 标签 | 搜索分 `vl`，z-score 归一化（mean/std 写入 checkpoint 与 bin） |
 | 推理 | FT int32 累加器 + 增量更新；FC 纯 int8 点积 + per-layer input scale |

@@ -18,7 +18,7 @@ class NNUE(nn.Module):
 
     def __init__(
         self,
-        n_features: int = 16536,
+        n_features: int = 1260,
         l1: int = 512,
         l2: int = 32,
         l3: int = 32,

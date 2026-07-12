@@ -20,35 +20,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from features.registry import DEFAULT_FEATURE_KIND, FeatureFn, get_feature_spec
+from features.xqwl_psq import fen_to_feature_indices
 from mycchess_sf.fen_parse import parse_fen_board
 
 DEFAULT_DATA_PATTERN = "worker_*/chunk_*.txt"
 MAX_AUTO_IO_WORKERS = 8
 _WORKER_DIR_RE = re.compile(r"^worker_(\d+)$")
-
-_ACTIVE_FEAT_FN: FeatureFn | None = None
-_ACTIVE_FEAT_LABEL = DEFAULT_FEATURE_KIND
-
-
-def configure_features(kind: str) -> tuple[int, str]:
-    """Set module-level featurizer used by precompute / dataset."""
-    global _ACTIVE_FEAT_FN, _ACTIVE_FEAT_LABEL
-    n_features, fn, label = get_feature_spec(kind)
-    _ACTIVE_FEAT_FN = fn
-    _ACTIVE_FEAT_LABEL = kind
-    return n_features, label
-
-
-def _worker_init_feature_kind(kind: str) -> None:
-    configure_features(kind)
-
-
-def _featurize_fn() -> FeatureFn:
-    if _ACTIVE_FEAT_FN is None:
-        configure_features(DEFAULT_FEATURE_KIND)
-    assert _ACTIVE_FEAT_FN is not None
-    return _ACTIVE_FEAT_FN
 
 
 @dataclass(frozen=True)
@@ -152,7 +129,7 @@ def _featurize_sample(sample: Sample) -> Sample:
     return Sample(
         fen=sample.fen,
         vl=sample.vl,
-        feat_indices=_featurize_fn()(sample.fen),
+        feat_indices=fen_to_feature_indices(sample.fen),
     )
 
 
@@ -164,17 +141,13 @@ def precompute_features(
     samples: list[Sample],
     *,
     load_workers: object = "auto",
-    feature_kind: str | None = None,
 ) -> list[Sample]:
     if not samples or samples[0].feat_indices is not None:
         return samples
 
-    if feature_kind is not None:
-        configure_features(feature_kind)
-
     workers, workers_label = parse_worker_count(load_workers)
     print(
-        f"[data] precomputing {_ACTIVE_FEAT_LABEL} features for {len(samples):,} samples "
+        f"[data] precomputing PSQ features for {len(samples):,} samples "
         f"(workers={workers_label}) ...",
         flush=True,
     )
@@ -193,11 +166,7 @@ def precompute_features(
 
     result: list[Sample] = []
     completed = 0
-    with ProcessPoolExecutor(
-        max_workers=workers,
-        initializer=_worker_init_feature_kind,
-        initargs=(_ACTIVE_FEAT_LABEL,),
-    ) as pool:
+    with ProcessPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(_featurize_chunk, chunk) for chunk in chunks]
         for future in as_completed(futures):
             result.extend(future.result())
@@ -561,7 +530,7 @@ class NnueDataset:
 
     def __getitem__(self, idx: int) -> tuple[np.ndarray, float, float]:
         s = self.samples[idx]
-        indices = s.feat_indices if s.feat_indices is not None else _featurize_fn()(s.fen)
+        indices = s.feat_indices if s.feat_indices is not None else fen_to_feature_indices(s.fen)
         target_norm = (s.vl - self.label_mean) / self.label_std
         return indices, target_norm, s.vl
 

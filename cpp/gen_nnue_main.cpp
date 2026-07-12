@@ -65,8 +65,6 @@ bool file_exists(const std::string &path) {
 
 std::string auto_detect_nnue_path() {
   static const char *candidates[] = {
-      "deployment/model/quantized.xqnnue.bin",
-      "data/nnue_model/quantized.xqnnue.bin",
       "nnue_qINT8/output/quantized.xqnnue.bin",
       "deployment/nnue/quantized.xqnnue.bin",
       "quantized.xqnnue.bin",

@@ -214,13 +214,6 @@ struct XQWLPosition {
 
   int side_to_move() const { return board.sdPlayer; }
 
-  std::vector<int> halfka_feature_indices() const {
-    int feats[xqwl_halfka::kMaxActive];
-    int n = 0;
-    xqwl_halfka::extract_features_perspective(board, board.sdPlayer, feats, n);
-    return std::vector<int>(feats, feats + n);
-  }
-
   XQWLPosition copy() const {
     XQWLPosition q;
     q.board = board;
@@ -329,7 +322,6 @@ PYBIND11_MODULE(xqwlight_core, m) {
       .def("is_mate", &XQWLPosition::is_mate)
       .def("terminal_kind", &XQWLPosition::terminal_kind)
       .def("fen", &XQWLPosition::fen)
-      .def("halfka_feature_indices", &XQWLPosition::halfka_feature_indices)
       .def("evaluate", &XQWLPosition::evaluate)
       .def("side_to_move", &XQWLPosition::side_to_move)
       .def("copy", &XQWLPosition::copy);

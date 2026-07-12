@@ -38,7 +38,7 @@ python3 export_bin.py --input output/quantized.xqint8.pt --output output/quantiz
 | magic | `XQNNUE01` |
 | version | `2`（v1 仍可读，缺 input scale 时用保守默认） |
 | label_mean / label_std | 与训练 checkpoint 一致 |
-| n_features, l1, l2, l3 | 16536, 512, 32, 32 |
+| n_features, l1, l2, l3 | 1260, 512, 32, 32 |
 | ft_clip, act_clip | 激活截断 |
 | fc0/1/2_input_scale | **v2 新增**，FC 层输入量化步长 |
 | 权重 | FT + FC0/1/2 的 int8 权重、int32 bias、float scales |

@@ -5,14 +5,12 @@ data:
   val_ratio: 0.01
   val_seed: 42
   load_workers: auto
-  feature_kind: half_ka_v2_hm
 
 model:
-  n_features: 16536
+  n_features: 1260
   l1: 512
   l2: 32
   l3: 32
-  feature_kind: half_ka_v2_hm
 
 train:
   batch_size: 16384
