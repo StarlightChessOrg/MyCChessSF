@@ -18,7 +18,7 @@ for p in (ROOT, TRAIN, QINT8):
 
 import xqwlight_core as xc
 from data.dataset import _parse_line
-from features.xqwl_psq import fen_to_feature_indices
+from features.half_ka_v2_hm import fen_to_feature_indices
 from int8_nnue import QuantizedNNUE
 
 

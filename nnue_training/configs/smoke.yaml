@@ -2,12 +2,14 @@ data:
   source: ../nnue_data
   pattern: "worker_*/chunk_*.txt"
   val_workers: [30, 31]
+  feature_kind: half_ka_v2_hm
 
 model:
-  n_features: 1260
+  n_features: 16536
   l1: 512
   l2: 32
   l3: 32
+  feature_kind: half_ka_v2_hm
 
 train:
   batch_size: 2048

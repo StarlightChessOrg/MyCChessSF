@@ -1,4 +1,4 @@
-"""Train MyCChessSF NNUE on nnue_data (XQWL-PSQ, z-score labels)."""
+"""Train MyCChessSF NNUE on nnue_data (HalfKAv2_hm, z-score labels)."""
 from __future__ import annotations
 
 import argparse
@@ -18,6 +18,7 @@ from data.dataset import (
     DEFAULT_DATA_PATTERN,
     NnueDataset,
     compute_zscore_stats,
+    configure_features,
     make_dataloader,
     pack_precomputed_dataset,
     parse_worker_count,
@@ -26,7 +27,7 @@ from data.dataset import (
     split_samples,
     split_samples_by_ratio,
 )
-from features.xqwl_psq import N_FEATURES
+from features.registry import resolve_feature_kind
 
 
 def log_train(message: str = "") -> None:
@@ -196,7 +197,7 @@ def save_checkpoint(
             "label_mean": label_mean,
             "label_std": label_std,
             "config": config,
-            "n_features": N_FEATURES,
+            "n_features": model_cfg.get("n_features"),
         },
         path,
     )
@@ -275,6 +276,16 @@ def main() -> None:
     model_cfg = cfg["model"]
     train_cfg = cfg["train"]
 
+    feature_kind = resolve_feature_kind(cfg)
+    n_features, feature_label = configure_features(feature_kind)
+    if model_cfg.get("n_features", n_features) != n_features:
+        raise ValueError(
+            f"model.n_features={model_cfg.get('n_features')} does not match "
+            f"{feature_kind} ({n_features})"
+        )
+    model_cfg = {**model_cfg, "n_features": n_features, "feature_kind": feature_kind}
+    print(f"[features] kind={feature_kind}  dim={n_features}  ({feature_label})", flush=True)
+
     data_source = resolve_path(ROOT, data_cfg["source"])
     ckpt_dir = resolve_path(ROOT, train_cfg.get("checkpoint_dir", "checkpoints"))
     device = torch.device(train_cfg.get("device", "cpu"))
@@ -317,8 +328,12 @@ def main() -> None:
     precompute = bool(train_cfg.get("precompute_features", use_cuda))
     feature_workers = train_cfg.get("feature_workers", data_cfg.get("load_workers", "auto"))
     if precompute:
-        train_samples = precompute_features(train_samples, load_workers=feature_workers)
-        val_samples = precompute_features(val_samples, load_workers=feature_workers)
+        train_samples = precompute_features(
+            train_samples, load_workers=feature_workers, feature_kind=feature_kind
+        )
+        val_samples = precompute_features(
+            val_samples, load_workers=feature_workers, feature_kind=feature_kind
+        )
         train_ds = pack_precomputed_dataset(
             train_samples,
             label_mean=label_mean,
@@ -366,7 +381,7 @@ def main() -> None:
     )
 
     model = NNUE(
-        n_features=model_cfg.get("n_features", N_FEATURES),
+        n_features=n_features,
         l1=model_cfg["l1"],
         l2=model_cfg["l2"],
         l3=model_cfg["l3"],

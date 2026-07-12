@@ -69,7 +69,7 @@ python train.py --config configs/full_gpu.yaml
 
 | 项目 | 默认 |
 |------|------|
-| 特征 | `features/xqwl_psq.py`，1260 维 |
+| 特征 | `features/half_ka_v2_hm.py`，16536 维（HalfKAv2_hm） |
 | L1 / L2 / L3 | 512 / 32 / 32 |
 | FT | `EmbeddingBag` + bias |
 | 头 | FC + pairwise 变换 + sq/clipped ReLU 拼接 |

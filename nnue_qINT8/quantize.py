@@ -16,7 +16,14 @@ for p in (ROOT, TRAINING_ROOT, REPO_ROOT):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-from data.dataset import DEFAULT_DATA_PATTERN, NnueDataset, load_samples, make_dataloader
+from data.dataset import (
+    DEFAULT_DATA_PATTERN,
+    NnueDataset,
+    configure_features,
+    load_samples,
+    make_dataloader,
+)
+from features.registry import resolve_feature_kind
 from evaluate import evaluate_models
 from int8_nnue import QuantizedNNUE, calibrate_fc_input_scales, quantize_float_nnue
 from model.nnue import NNUE
@@ -38,7 +45,7 @@ def load_float_checkpoint(checkpoint_path: Path, device: torch.device) -> tuple[
     model_cfg = config.get("model", {})
 
     model = NNUE(
-        n_features=int(ckpt.get("n_features", model_cfg.get("n_features", 1260))),
+        n_features=int(ckpt.get("n_features", model_cfg.get("n_features", 16536))),
         l1=int(model_cfg.get("l1", 512)),
         l2=int(model_cfg.get("l2", 32)),
         l3=int(model_cfg.get("l3", 32)),
@@ -158,6 +165,10 @@ def main() -> None:
         raise FileNotFoundError(f"Dataset directory not found: {data_source}")
 
     float_model, ckpt = load_float_checkpoint(checkpoint_path, device)
+    config = ckpt.get("config", {})
+    feature_kind = resolve_feature_kind(config)
+    n_features, feature_label = configure_features(feature_kind)
+    print(f"[features] kind={feature_kind}  dim={n_features}  ({feature_label})")
     label_mean = float(ckpt["label_mean"])
     label_std = float(ckpt["label_std"])
     print(f"[label] mean={label_mean:.4f}  std={label_std:.4f}")

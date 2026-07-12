@@ -7,7 +7,7 @@
 | 搜索引擎 | `XQWL06.CPP`（elephantbase.net / GPL） |
 | 界面资源 | xqbase/xqwlight Win32/RES（GPL） |
 | 规则抽取 | MyCChessRL `xqwl_extract.inc` 同源思路 |
-| NNUE | MyCChessSF 原生设计（XQWL-PSQ，非 Pikafish 移植） |
+| NNUE | Pikafish HalfKAv2_hm 特征（16536 维） |
 
 ## 许可证
 
