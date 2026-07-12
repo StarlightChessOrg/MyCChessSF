@@ -21,6 +21,8 @@ from data.dataset import (
     NnueDataset,
     compute_zscore_stats,
     make_dataloader,
+    pack_precomputed_dataset,
+    parse_worker_count,
     precompute_features,
     resolve_train_workers,
     split_samples,
@@ -216,9 +218,10 @@ def main() -> None:
         print(f"[device] cuda={torch.cuda.get_device_name(device)}", flush=True)
 
     pattern = data_cfg.get("pattern", DEFAULT_DATA_PATTERN)
-    load_workers = int(data_cfg.get("load_workers", 0))
+    load_workers = data_cfg.get("load_workers", "auto")
+    _, load_workers_label = parse_worker_count(load_workers)
     print(
-        f"[data] source={data_source}  pattern={pattern!r}  load_workers={load_workers or 'auto'}",
+        f"[data] source={data_source}  pattern={pattern!r}  load_workers={load_workers_label}",
         flush=True,
     )
 
@@ -244,19 +247,35 @@ def main() -> None:
     print(f"[label] z-score mean={label_mean:.4f}  std={label_std:.4f}", flush=True)
 
     precompute = bool(train_cfg.get("precompute_features", use_cuda))
-    feature_workers = int(train_cfg.get("feature_workers", data_cfg.get("load_workers", 0)))
+    feature_workers = train_cfg.get("feature_workers", data_cfg.get("load_workers", "auto"))
     if precompute:
         train_samples = precompute_features(train_samples, load_workers=feature_workers)
         val_samples = precompute_features(val_samples, load_workers=feature_workers)
+        train_ds = pack_precomputed_dataset(
+            train_samples,
+            label_mean=label_mean,
+            label_std=label_std,
+        )
+        val_ds = pack_precomputed_dataset(
+            val_samples,
+            label_mean=label_mean,
+            label_std=label_std,
+        )
+        del train_samples, val_samples
+    else:
+        train_ds = NnueDataset(train_samples, label_mean=label_mean, label_std=label_std)
+        val_ds = NnueDataset(val_samples, label_mean=label_mean, label_std=label_std)
 
-    train_ds = NnueDataset(train_samples, label_mean=label_mean, label_std=label_std)
-    val_ds = NnueDataset(val_samples, label_mean=label_mean, label_std=label_std)
-
-    num_workers = resolve_train_workers(int(train_cfg.get("num_workers", 0)), use_cuda=use_cuda)
+    num_workers, num_workers_label = resolve_train_workers(
+        train_cfg.get("num_workers", "auto"),
+        use_cuda=use_cuda,
+        precomputed=precompute,
+    )
     batch_size = int(train_cfg["batch_size"])
     print(
-        f"[loader] num_workers={num_workers}  batch_size={batch_size}  "
-        f"prefetch={train_cfg.get('prefetch_factor', 2)}  pin_memory={use_cuda}",
+        f"[loader] num_workers={num_workers_label}  batch_size={batch_size}  "
+        f"prefetch={train_cfg.get('prefetch_factor', 2)}  pin_memory={use_cuda}  "
+        f"storage={'csr' if precompute else 'samples'}",
         flush=True,
     )
 
@@ -302,6 +321,12 @@ def main() -> None:
     epochs_without_improvement = 0
 
     print(f"[train] max_epochs={max_epochs}  early_stopping_patience={patience}", flush=True)
+    if precompute and num_workers == 0:
+        print(
+            "[train] precomputed CSR dataset uses num_workers=0 to avoid copying GB of RAM "
+            "into DataLoader worker processes (especially slow on Windows).",
+            flush=True,
+        )
 
     for epoch in range(1, max_epochs + 1):
         epoch_t0 = time.time()

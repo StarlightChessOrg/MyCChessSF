@@ -4,7 +4,7 @@ data:
   pattern: "merged.txt"
   val_ratio: 0.01
   val_seed: 42
-  load_workers: 8
+  load_workers: auto
 
 model:
   n_features: 1260
@@ -18,10 +18,10 @@ train:
   early_stopping_patience: 32
   lr: 0.001
   weight_decay: 0.0
-  num_workers: 8
+  num_workers: auto
   prefetch_factor: 4
   precompute_features: true
-  feature_workers: 8
+  feature_workers: auto
   tqdm: true
   device: cuda
   checkpoint_dir: checkpoints/full_gpu

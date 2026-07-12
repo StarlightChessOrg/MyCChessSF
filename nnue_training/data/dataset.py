@@ -62,18 +62,57 @@ def _worker_id(path: Path) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def parse_worker_count(value: object, *, default_auto: bool = True) -> tuple[int, str]:
+    """Parse worker config: ``auto``/``0``/negative -> CPU core count, ``1`` -> serial."""
+    if isinstance(value, str) and value.lower() == "auto":
+        count = os.cpu_count() or 1
+        return count, f"auto ({count})"
+
+    if value is None:
+        if default_auto:
+            count = os.cpu_count() or 1
+            return count, f"auto ({count})"
+        return 1, "1"
+
+    count = int(value)
+    if count <= 0:
+        resolved = os.cpu_count() or 1
+        return resolved, f"auto ({resolved})"
+    return count, str(count)
+
+
+def resolve_train_workers(
+    value: object,
+    *,
+    use_cuda: bool,
+    precomputed: bool,
+) -> tuple[int, str]:
+    """DataLoader workers. Large precomputed datasets default to 0 to avoid pickling GB of RAM."""
+    if isinstance(value, str) and value.lower() == "auto":
+        if precomputed:
+            return 0, "auto (0, precomputed in-memory)"
+        if use_cuda:
+            count = min(8, os.cpu_count() or 1)
+            return count, f"auto ({count})"
+        return 0, "auto (0)"
+
+    if value is None:
+        value = 0
+
+    count = int(value)
+    if count <= 0:
+        if precomputed:
+            return 0, "0 (precomputed in-memory)"
+        if use_cuda:
+            resolved = min(8, os.cpu_count() or 1)
+            return resolved, str(resolved)
+        return 0, "0"
+    return count, str(count)
+
+
 def _resolve_load_workers(load_workers: int) -> int:
-    if load_workers <= 0:
-        load_workers = os.cpu_count() or 1
-    return max(1, load_workers)
-
-
-def resolve_train_workers(num_workers: int, *, use_cuda: bool) -> int:
-    if num_workers > 0:
-        return num_workers
-    if use_cuda:
-        return min(8, os.cpu_count() or 1)
-    return 0
+    count, _ = parse_worker_count(load_workers)
+    return count
 
 
 def _featurize_sample(sample: Sample) -> Sample:
@@ -91,13 +130,17 @@ def _featurize_chunk(samples: list[Sample]) -> list[Sample]:
 def precompute_features(
     samples: list[Sample],
     *,
-    load_workers: int = 0,
+    load_workers: object = "auto",
 ) -> list[Sample]:
     if not samples or samples[0].feat_indices is not None:
         return samples
 
-    workers = _resolve_load_workers(load_workers)
-    print(f"[data] precomputing PSQ features for {len(samples):,} samples ...", flush=True)
+    workers, workers_label = parse_worker_count(load_workers)
+    print(
+        f"[data] precomputing PSQ features for {len(samples):,} samples "
+        f"(workers={workers_label}) ...",
+        flush=True,
+    )
 
     if workers <= 1:
         from tqdm import tqdm
@@ -124,6 +167,57 @@ def precompute_features(
                 flush=True,
             )
     return result
+
+
+def pack_precomputed_dataset(
+    samples: list[Sample],
+    *,
+    label_mean: float,
+    label_std: float,
+) -> "PrecomputedNnueDataset":
+    if not samples:
+        raise ValueError("Cannot pack empty sample list")
+
+    missing = sum(1 for sample in samples[: min(8, len(samples))] if sample.feat_indices is None)
+    if missing:
+        raise ValueError("pack_precomputed_dataset requires precomputed feat_indices")
+
+    n_samples = len(samples)
+    total_features = sum(len(sample.feat_indices) for sample in samples)
+    print(
+        f"[data] packing {n_samples:,} samples into CSR arrays "
+        f"({total_features:,} feature indices) ...",
+        flush=True,
+    )
+
+    feat_indices = np.empty(total_features, dtype=np.int32)
+    feat_offsets = np.empty(n_samples + 1, dtype=np.int64)
+    targets_norm = np.empty(n_samples, dtype=np.float32)
+    targets_raw = np.empty(n_samples, dtype=np.float32)
+
+    pos = 0
+    for i, sample in enumerate(samples):
+        indices = sample.feat_indices
+        assert indices is not None
+        length = len(indices)
+        feat_offsets[i] = pos
+        feat_indices[pos : pos + length] = indices
+        pos += length
+        targets_norm[i] = (sample.vl - label_mean) / label_std
+        targets_raw[i] = sample.vl
+    feat_offsets[n_samples] = pos
+
+    print(
+        f"[data] pack complete: indices={feat_indices.nbytes / 1024 / 1024:.1f} MiB, "
+        f"offsets={feat_offsets.nbytes / 1024:.1f} KiB",
+        flush=True,
+    )
+    return PrecomputedNnueDataset(
+        feat_indices=feat_indices,
+        feat_offsets=feat_offsets,
+        targets_norm=targets_norm,
+        targets_raw=targets_raw,
+    )
 
 
 def _parse_file_range(path_str: str, start: int, end: int) -> tuple[list[Sample], int, int]:
@@ -272,7 +366,7 @@ def load_samples(
     source: str | Path,
     pattern: str = DEFAULT_DATA_PATTERN,
     *,
-    load_workers: int = 0,
+    load_workers: object = "auto",
     progress_every: int = 500_000,
 ) -> tuple[list[Sample], int]:
     root = Path(source)
@@ -355,7 +449,7 @@ def split_samples(
     pattern: str,
     val_workers: list[int],
     *,
-    load_workers: int = 0,
+    load_workers: object = "auto",
 ) -> tuple[list[Sample], list[Sample], int]:
     root = Path(source)
     val_ids = set(val_workers)
@@ -375,7 +469,7 @@ def split_samples_by_ratio(
     val_ratio: float,
     *,
     seed: int = 42,
-    load_workers: int = 0,
+    load_workers: object = "auto",
 ) -> tuple[list[Sample], list[Sample], int]:
     if not 0.0 < val_ratio < 1.0:
         raise ValueError(f"val_ratio must be in (0, 1), got {val_ratio}")
@@ -431,6 +525,31 @@ class NnueDataset(Dataset):
         return indices, target_norm, s.vl
 
 
+class PrecomputedNnueDataset(Dataset):
+    """Compact CSR storage for precomputed sparse features (avoids pickling millions of Sample objects)."""
+
+    def __init__(
+        self,
+        *,
+        feat_indices: np.ndarray,
+        feat_offsets: np.ndarray,
+        targets_norm: np.ndarray,
+        targets_raw: np.ndarray,
+    ) -> None:
+        self.feat_indices = feat_indices
+        self.feat_offsets = feat_offsets
+        self.targets_norm = targets_norm
+        self.targets_raw = targets_raw
+
+    def __len__(self) -> int:
+        return len(self.targets_norm)
+
+    def __getitem__(self, idx: int) -> tuple[np.ndarray, float, float]:
+        start = int(self.feat_offsets[idx])
+        end = int(self.feat_offsets[idx + 1])
+        return self.feat_indices[start:end], float(self.targets_norm[idx]), float(self.targets_raw[idx])
+
+
 def collate_fn(batch: list[tuple[np.ndarray, float, float]]) -> tuple[torch.Tensor, ...]:
     feat_arrays = [feat_indices for feat_indices, _, _ in batch]
     indices_arr = np.concatenate(feat_arrays) if len(feat_arrays) > 1 else feat_arrays[0]
@@ -452,7 +571,7 @@ def collate_fn(batch: list[tuple[np.ndarray, float, float]]) -> tuple[torch.Tens
 
 
 def make_dataloader(
-    dataset: NnueDataset,
+    dataset: Dataset,
     *,
     batch_size: int,
     shuffle: bool,
