@@ -24,20 +24,23 @@ def _require_xqwlight():
 class XqwlGameState:
     """Wraps ``xqwlight_core.Position``; ``board_view`` has red on the bottom row."""
 
-    __slots__ = ("pos", "_last_move_iccs")
+    __slots__ = ("pos", "_move_history")
 
     def __init__(self) -> None:
         P = _require_xqwlight()
         self.pos = P()
-        self._last_move_iccs: str | None = None
+        self._move_history: list[str] = []
 
     def reset(self) -> None:
         self.pos.reset()
-        self._last_move_iccs = None
+        self._move_history.clear()
 
     @property
     def last_move_iccs(self) -> str | None:
-        return self._last_move_iccs
+        return self._move_history[-1] if self._move_history else None
+
+    def ply_count(self) -> int:
+        return int(self.pos.ply_count())
 
     @property
     def red_to_move(self) -> bool:
@@ -52,8 +55,17 @@ class XqwlGameState:
     def make_move_iccs(self, mv: str) -> bool:
         ok = bool(self.pos.make_move_iccs(mv))
         if ok:
-            self._last_move_iccs = mv
+            self._move_history.append(mv)
         return ok
+
+    def undo_moves(self, count: int) -> bool:
+        n = int(count)
+        if n <= 0 or self.ply_count() < n:
+            return False
+        for _ in range(n):
+            self.pos.undo()
+        del self._move_history[-n:]
+        return True
 
     def fen(self) -> str:
         return self.pos.fen()
@@ -81,7 +93,7 @@ class XqwlGameState:
     def copy(self) -> XqwlGameState:
         o = object.__new__(XqwlGameState)
         o.pos = self.pos.copy()
-        o._last_move_iccs = self._last_move_iccs
+        o._move_history = list(self._move_history)
         return o
 
     def raw_position(self):

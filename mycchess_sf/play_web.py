@@ -196,6 +196,59 @@ class XqwlWebSession:
     def _both_ai(self) -> bool:
         return self.strategy_red == STRATEGY_XQWL and self.strategy_black == STRATEGY_XQWL
 
+    def _strategy_for_side(self, side: str) -> str:
+        return self.strategy_red if side == "red" else self.strategy_black
+
+    def _undo_moves_count(self) -> int:
+        """Plies to rewind to the previous decision point for the human side to move."""
+        side = self.game.get_side()
+        if self._strategy_for_side(side) != STRATEGY_HUMAN:
+            return 0
+        n = self.game.ply_count()
+        if n <= 0:
+            return 0
+        opp = "black" if side == "red" else "red"
+        if self._strategy_for_side(opp) == STRATEGY_XQWL:
+            if n < 2:
+                return 0
+            return 2
+        if n < 2:
+            return 0
+        return 2
+
+    def _can_undo(self) -> bool:
+        if self._ai_busy or self._ai_pending:
+            return False
+        return self._undo_moves_count() > 0
+
+    def _sync_last_move_from_history(self) -> None:
+        lm = self.game.last_move_iccs
+        if lm:
+            x1, y1, x2, y2 = parse_move_squares(lm)
+            self.last_move = (x1, y1, x2, y2)
+        else:
+            self.last_move = None
+
+    def undo_human_round(self) -> dict | None:
+        with self._lock:
+            if self._ai_busy or self._ai_pending:
+                return {"error": f"{BRAND_ZH} 思考中，无法悔棋"}
+            n = self._undo_moves_count()
+            if n <= 0:
+                return {"error": "无法悔棋"}
+            total = self.game.ply_count()
+            self._cancel_ai_timer()
+            if not self.game.undo_moves(n):
+                return {"error": "悔棋失败"}
+            for ply_idx in range(total, total - n, -1):
+                side = "red" if ply_idx % 2 == 1 else "black"
+                if self._strategy_for_side(side) == STRATEGY_XQWL and self._think_log:
+                    self._think_log.pop()
+            self.sel_from = None
+            self._ai_thinking = ""
+            self._sync_last_move_from_history()
+        return None
+
     def snapshot(self) -> dict:
         with self._lock:
             arr = self._raw_board()
@@ -245,6 +298,7 @@ class XqwlWebSession:
                 "ai_busy": self._ai_busy,
                 "ai_pending": self._ai_pending,
                 "input_locked": input_locked,
+                "can_undo": self._can_undo(),
                 "current_strategy": cur_strat,
                 "ai_thinking": self._ai_thinking,
                 "think_log": list(self._think_log[-60:]),
@@ -532,6 +586,7 @@ def _html_page() -> str:
         </div>
         <div class="check-row"><label><input type="checkbox" id="chk-sound" checked/> 音效</label></div>
         <button type="button" id="btn-new">新局</button>
+        <button type="button" id="btn-undo" disabled>悔棋</button>
         <button type="button" id="btn-flip">翻转棋盘</button>
         <div id="status"></div>
         <div id="ai-thinking"></div>
@@ -552,7 +607,7 @@ def _html_page() -> str:
   const boardEl=document.getElementById("board"), layer=document.getElementById("layer");
   const statusEl=document.getElementById("status"), shell=document.querySelector(".win");
   const selRed=document.getElementById("sel-red"), selBlack=document.getElementById("sel-black");
-  const btnNew=document.getElementById("btn-new"), btnFlip=document.getElementById("btn-flip");
+  const btnNew=document.getElementById("btn-new"), btnUndo=document.getElementById("btn-undo"), btnFlip=document.getElementById("btn-flip");
   const chkBook=document.getElementById("chk-book"), bookRow=document.getElementById("book-row");
   const chkNnue=document.getElementById("chk-nnue"), nnueRow=document.getElementById("nnue-row");
   const bookPathEl=document.getElementById("book-path"), nnuePathEl=document.getElementById("nnue-path");
@@ -696,6 +751,7 @@ def _html_page() -> str:
     renderThinkLog(snap.think_log||[]);
     renderBoard(snap);
     shell.classList.toggle("input-locked",isInputLocked(snap));
+    if(btnUndo)btnUndo.disabled=!snap.can_undo;
     lastSnap=snap;
   }}
   function handleMessages(msg){{
@@ -769,6 +825,19 @@ def _html_page() -> str:
     lastThinkLogKey=null;
     fetch("/api/new_game",{{method:"POST"}}).then(function(r){{return r.json();}}).then(function(){{armPoll(20);}});
   }});
+  if(btnUndo){{
+    btnUndo.addEventListener("click",function(){{
+      if(btnUndo.disabled)return;
+      fetch("/api/undo",{{method:"POST"}}).then(function(r){{return r.json();}})
+        .then(function(j){{
+          if(j.error){{showToast("悔棋",j.error,2800);return;}}
+          lastBoardKey=null;
+          lastThinkLogKey=null;
+          if(j.state){{applySnap(j.state);handleMessages(j.messages||{{}});}}
+          armPoll(280);
+        }});
+    }});
+  }}
   function updateFlipButton(){{
     btnFlip.textContent=viewFlipY?"翻转棋盘（还原红下）":"翻转棋盘（己方在下）";
   }}
@@ -958,6 +1027,13 @@ def main() -> None:
     async def _api_new_game(_request):
         err = session.new_game()
         return json(err or {})
+
+    @app.post("/api/undo")
+    async def _api_undo(_request):
+        err = session.undo_human_round()
+        if err and err.get("error"):
+            return json(err)
+        return json({"state": session.snapshot(), "messages": session.pop_client_messages()})
 
     @app.post("/api/book")
     async def _api_book(request):
