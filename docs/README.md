@@ -11,7 +11,7 @@
 
 ## 引擎算法
 
-- [引擎算法技术](engine-algorithms.md) — 搜索、NNUE 推理、staticEval 剪枝、PST
+- [引擎算法技术](engine-algorithms.md) — 搜索、NNUE 推理、TT staticEval 缓存、PST
 
 ## NNUE 管线
 

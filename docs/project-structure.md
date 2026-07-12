@@ -78,13 +78,13 @@ MyCChessSF/
 |------|------|
 | `scripts/make_release.sh` | 本地：构建 `deployment/` 并打 tar 包到 `dist/` |
 | `.github/workflows/release.yml` | 推送 `v*` 标签时 CI 自动构建并上传 Release 附件 |
-| `RELEASE_NOTES_v*.md` | 对应版本的 Release 说明正文（如 `RELEASE_NOTES_v0.1.0.md`） |
+| `RELEASE_NOTES_v*.md` | 对应版本的 Release 说明正文（如 `RELEASE_NOTES_v0.2.0.md`） |
 
 本地打包示例：
 
 ```bash
-bash scripts/make_release.sh 0.1.0
-# 产物：dist/MyCChessSF-v0.1.0-linux-x86_64-py3.13.tar.gz
+bash scripts/make_release.sh 0.2.0
+# 产物：dist/MyCChessSF-v0.2.0-linux-x86_64-py3.13.tar.gz
 ```
 
 更多见 [开发与限制 — Release 发布](development.md#release-发布)。

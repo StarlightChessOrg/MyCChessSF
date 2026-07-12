@@ -108,6 +108,6 @@ PYTHONPATH=. python3 scripts/test_nnue_wsl.py
 
 ## 相关文档
 
-- [引擎算法技术](engine-algorithms.md) — 搜索、剪枝、staticEval、NNUE 集成
+- [引擎算法技术](engine-algorithms.md) — 搜索、LMR / 空着剪枝、NNUE 集成
 - [NNUE 管线总览](nnue-overview.md)
 - [NNUE 架构调研（Pikafish）](nnue_pikafish_research.md)

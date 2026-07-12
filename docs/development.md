@@ -38,15 +38,15 @@ XQWL 版权见 elephantbase.net；本仓库见根目录 [LICENSE](../LICENSE)。
 
 ```bash
 # 本地打包（需 Linux / WSL）
-bash scripts/make_release.sh 0.1.0
-# 产物：dist/MyCChessSF-v0.1.0-linux-x86_64-py3.13.tar.gz + .sha256
+bash scripts/make_release.sh 0.2.0
+# 产物：dist/MyCChessSF-v0.2.0-linux-x86_64-py3.13.tar.gz + .sha256
 ```
 
 推送版本标签后，GitHub Actions 会自动构建并发布 Release：
 
 ```bash
-git tag -a v0.1.0 -m "MyCChessSF v0.1.0"
-git push origin v0.1.0
+git tag -a v0.2.0 -m "MyCChessSF v0.2.0"
+git push origin v0.2.0
 ```
 
 Release 说明见仓库根目录 `RELEASE_NOTES_v*.md`。

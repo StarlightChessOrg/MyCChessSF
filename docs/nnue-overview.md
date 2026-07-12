@@ -53,6 +53,6 @@ cd .. && PYTHONPATH=. python3 scripts/test_nnue_wsl.py
 - **数据生成**（`xqwl_gen_nnue`）默认从 **`deployment/model/quantized.xqnnue.bin`** 加载（构建时自 `data/nnue_model/` 复制）
 - 空着剪枝仍用 PST 子力（`NullOkay()`）
 - **单视角 FT 累加器**：每步只更新走子后视角；`acc_valid[]` lazy refresh；评估只读 `acc[sdPlayer]`
-- TT 缓存 `staticEval`，并驱动 razoring / futility / LMP 等剪枝
+- TT 缓存 `staticEval`（供评估复用，不用于剪枝）
 
 细节见 [引擎算法技术](engine-algorithms.md) 与 [INT8 量化与 C++ 推理](nnue-int8-inference.md)。

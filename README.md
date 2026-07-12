@@ -39,7 +39,7 @@ mycchess-play-web --port 5151
 
 | 文档 | 说明 |
 |------|------|
-| [引擎算法技术](docs/engine-algorithms.md) | 搜索框架、NNUE 增量推理、staticEval 剪枝、PST |
+| [引擎算法技术](docs/engine-algorithms.md) | 搜索框架、NNUE 增量推理、LMR / 空着剪枝、PST |
 
 ### NNUE 管线
 
