@@ -26,18 +26,21 @@ MyCChessSF/
 │   ├── README.md
 │   ├── compressed_files/         开局库与 openbook 压缩包（构建时解压 book.7z）
 │   └── nnue_model/               INT8 NNUE 权重（打包源 → deployment/model/）
-├── deployment/                   build_linux.sh 产出（lib/ + bin/ + db/ + model/ + requirements.txt）
 ├── nnue_data/                    xqwl_gen_nnue 输出（FEN\tvl，通常不入库）
 ├── nnue_training/                浮点 NNUE PyTorch 训练
 ├── nnue_qINT8/                   INT8 量化 + .xqnnue.bin 导出
 ├── third_party/                  外部参考（如 Pikafish），调研用，不参与编译
+│   └── Pikafish/                 中国象棋 NNUE/搜索参考实现（只读）
 ├── tmps/                         本地临时 checkpoint，*.pt 不入库
-├── scripts/
+├── scripts/                      构建、打包、测试脚本
 │   ├── build_linux.sh            一键编译 + 打包 deployment/
 │   ├── make_release.sh           打包 dist/ 发布压缩包
 │   ├── extract_book.py           从 book.7z 解压 BOOK.DAT 到 deployment/db/
 │   ├── test_nnue_wsl.py          C++ vs Python NNUE 对比测试
 │   └── fetch_xqwl_assets.py      拉取网页 UI 资源
+├── .github/workflows/            CI（推送 v* 标签时自动构建 Release）
+├── deployment/                   build_linux.sh 产出（gitignore，可部署目录）
+├── dist/                         make_release.sh 产出（gitignore，Release 压缩包）
 └── docs/                         文档（本目录）
 ```
 
@@ -50,6 +53,38 @@ MyCChessSF/
 | `nnue_training/` | XQWL-PSQ 特征、EmbeddingBag + FC 头、拟合搜索分 |
 | `nnue_qINT8/` | 对称 INT8 量化、校准 input scale、导出二进制权重 |
 | `mycchess_sf/play_web.py` | 浏览器对弈前端 + Sanic 后端 |
+| `data/nnue_model/` | 部署用 INT8 权重源（`quantized.xqnnue.bin` 等） |
+| `data/compressed_files/` | 开局库等 7z 压缩包，`build_linux.sh` 解压 `book.7z` |
+
+## 辅助与生成目录
+
+与 [根目录 README](../README.md#仓库概览) 对应；下列路径多为本地生成或可选，**不影响从源码编译对弈**。
+
+| 目录 | 说明 |
+|------|------|
+| `third_party/` | 外部参考源码 vendored 进仓库，当前含 [Pikafish](nnue_pikafish_research.md)（`third_party/Pikafish/`）。仅供 NNUE 特征、搜索剪枝等**调研对照**，CMake **不**编译、链接其中任何代码 |
+| `tmps/` | 开发者本地 scratch。可将 `best.pt` 等 checkpoint 复制到此，跑 `nnue_qINT8/quantize.py` 或推理冒烟；`*.pt` 已在 `.gitignore`，不入库。说明见 `tmps/README.md` |
+| `deployment/` | `bash scripts/build_linux.sh` 生成的**可部署目录**（`lib/`、`bin/`、`db/`、`model/`）。已在 `.gitignore`；[GitHub Releases](https://github.com/StarlightChessOrg/MyCChessSF/releases/latest) 上的 tar 包即此目录的打包 |
+| `dist/` | `bash scripts/make_release.sh <版本>` 输出的 `MyCChessSF-v*-linux-x86_64-py*.tar.gz` 及 `.sha256`。已在 `.gitignore` |
+| `nnue_data/` | `xqwl_gen_nnue` 生成的训练语料（`FEN\tvl` 文本），体积大，通常不入库 |
+| 根目录 `xqwlight_core*.so` / `xqwl_gen_nnue` | 编译产物拷贝，便于 `PYTHONPATH=.` 测试；`.gitignore` 忽略 |
+
+## 发布相关
+
+| 路径 | 说明 |
+|------|------|
+| `scripts/make_release.sh` | 本地：构建 `deployment/` 并打 tar 包到 `dist/` |
+| `.github/workflows/release.yml` | 推送 `v*` 标签时 CI 自动构建并上传 Release 附件 |
+| `RELEASE_NOTES_v*.md` | 对应版本的 Release 说明正文（如 `RELEASE_NOTES_v0.1.0.md`） |
+
+本地打包示例：
+
+```bash
+bash scripts/make_release.sh 0.1.0
+# 产物：dist/MyCChessSF-v0.1.0-linux-x86_64-py3.13.tar.gz
+```
+
+更多见 [开发与限制 — Release 发布](development.md#release-发布)。
 
 ## 与 MyCChessRL 的区别
 
