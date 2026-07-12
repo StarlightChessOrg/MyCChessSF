@@ -5,6 +5,8 @@ data:
   val_ratio: 0.01
   val_seed: 42
   load_workers: auto
+  mate_threshold: 9800
+  mate_exclude_from_zscore: true
 
 model:
   n_features: 1260
@@ -25,3 +27,4 @@ train:
   tqdm: true
   device: cuda
   checkpoint_dir: checkpoints/full_gpu
+  mate_exclude_from_loss: true

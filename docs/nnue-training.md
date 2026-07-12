@@ -82,10 +82,20 @@ python train.py --config configs/full_gpu.yaml
 
 1. **多进程加载** — 读取 `merged.txt` 或分块文件，校验 FEN
 2. **划分 train/val** — 按 `val_ratio` 或 `val_workers`
-3. **z-score 统计** — 打印 `[label] z-score mean=... std=...`
+3. **z-score 统计** — 默认**仅用非将杀样本**（\|vl\| < 9800）计算 mean/std
 4. **特征预计算**（可选）— 多进程生成 PSQ 稀疏索引
-5. **CSR 打包** — 将特征压成紧凑数组，释放 FEN 字符串
-6. **训练循环** — 每个 epoch 含 train + val，带 tqdm
+5. **CSR 打包** — 将特征压成紧凑数组；统计 mate / quiet 样本数
+6. **训练循环** — 将杀样本**不参与 loss**；早停与 best  checkpoint 看 quiet 子集 `val_loss`
+
+### 将杀分单独处理
+
+| 配置 | 默认 | 说明 |
+|------|------|------|
+| `data.mate_threshold` | `9800` | \|vl\| ≥ 此值视为将杀带（与 C++ `WIN_VALUE` 一致） |
+| `data.mate_exclude_from_zscore` | `true` | z-score 的 mean/std 不含将杀样本 |
+| `train.mate_exclude_from_loss` | `true` | 训练/验证 loss 与早停仅统计 quiet 样本 |
+
+推理侧：C++ `xqwl_nnue.inc` 在 `|PST| ≥ WIN_VALUE-800` 时直接回退 PST，不依赖 NNUE 输出。
 
 示例日志片段：
 
@@ -98,8 +108,10 @@ val 1/384:   100%|██████████| 7/7 [00:00<00:00, 42.10batch/s
   val_loss      0.519952  ← best
   val_mae_norm  0.258649
   val_rmse_norm 0.721077
-  val_mae_vl    576.94
-  val_corr_vl   0.6913
+  val_mae_vl    576.94 (all)
+  val_corr_vl   0.6913 (all)
+  val_mae_quiet 42.15  corr 0.8123 (n=104,500)
+  val_mate      skipped n=4,422 (|vl|>=9800)
   checkpoint    saved best.pt (prev best n/a)
 
 train 2/384: 100%|██████████| 659/659 [00:49<00:00, 13.26batch/s]

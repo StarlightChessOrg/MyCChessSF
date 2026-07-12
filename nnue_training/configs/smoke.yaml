@@ -2,6 +2,8 @@ data:
   source: ../nnue_data
   pattern: "worker_*/chunk_*.txt"
   val_workers: [30, 31]
+  mate_threshold: 9800
+  mate_exclude_from_zscore: true
 
 model:
   n_features: 1260
@@ -19,4 +21,5 @@ train:
   prefetch_factor: 2
   device: cpu
   checkpoint_dir: checkpoints
+  mate_exclude_from_loss: true
   log_every: 50

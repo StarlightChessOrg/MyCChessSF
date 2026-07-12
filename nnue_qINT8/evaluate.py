@@ -25,7 +25,8 @@ def evaluate_models(
         "int8": _empty_metrics(),
     }
 
-    for indices, offsets, targets_norm, targets_raw in loader:
+    for batch in loader:
+        indices, offsets, targets_norm, targets_raw, _is_mate = batch
         indices = indices.to(device)
         offsets = offsets.to(device)
         targets_norm = targets_norm.to(device)

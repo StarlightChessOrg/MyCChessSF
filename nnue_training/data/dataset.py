@@ -21,6 +21,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from features.xqwl_psq import fen_to_feature_indices
+from labels import DEFAULT_MATE_THRESHOLD, is_mate_label
 from mycchess_sf.fen_parse import parse_fen_board
 
 DEFAULT_DATA_PATTERN = "worker_*/chunk_*.txt"
@@ -184,6 +185,7 @@ def pack_precomputed_dataset(
     *,
     label_mean: float,
     label_std: float,
+    mate_threshold: float = DEFAULT_MATE_THRESHOLD,
 ) -> "PrecomputedNnueDataset":
     if not samples:
         raise ValueError("Cannot pack empty sample list")
@@ -204,6 +206,7 @@ def pack_precomputed_dataset(
     feat_offsets = np.empty(n_samples + 1, dtype=np.int64)
     targets_norm = np.empty(n_samples, dtype=np.float32)
     targets_raw = np.empty(n_samples, dtype=np.float32)
+    is_mate = np.empty(n_samples, dtype=np.bool_)
 
     pos = 0
     for i, sample in enumerate(samples):
@@ -215,11 +218,13 @@ def pack_precomputed_dataset(
         pos += length
         targets_norm[i] = (sample.vl - label_mean) / label_std
         targets_raw[i] = sample.vl
+        is_mate[i] = is_mate_label(sample.vl, threshold=mate_threshold)
     feat_offsets[n_samples] = pos
 
     print(
         f"[data] pack complete: indices={feat_indices.nbytes / 1024 / 1024:.1f} MiB, "
-        f"offsets={feat_offsets.nbytes / 1024:.1f} KiB",
+        f"offsets={feat_offsets.nbytes / 1024:.1f} KiB, "
+        f"mate={int(is_mate.sum()):,} quiet={int((~is_mate).sum()):,}",
         flush=True,
     )
     return PrecomputedNnueDataset(
@@ -227,6 +232,8 @@ def pack_precomputed_dataset(
         feat_offsets=feat_offsets,
         targets_norm=targets_norm,
         targets_raw=targets_raw,
+        is_mate=is_mate,
+        mate_threshold=mate_threshold,
     )
 
 
@@ -502,15 +509,34 @@ def split_samples_by_ratio(
     return train_set, val_set, skipped
 
 
-def compute_zscore_stats(samples: list[Sample]) -> tuple[float, float]:
+def compute_zscore_stats(
+    samples: list[Sample],
+    *,
+    exclude_mate: bool = True,
+    mate_threshold: float = DEFAULT_MATE_THRESHOLD,
+) -> tuple[float, float]:
     if not samples:
         raise ValueError("Cannot compute z-score stats on empty sample list")
     values = np.array([s.vl for s in samples], dtype=np.float64)
+    if exclude_mate:
+        quiet = np.array([not is_mate_label(v, threshold=mate_threshold) for v in values])
+        if not quiet.any():
+            raise ValueError("All samples are mate-zone labels; cannot compute quiet z-score stats")
+        values = values[quiet]
     mean = float(values.mean())
     std = float(values.std())
     if std < 1e-8:
         std = 1.0
     return mean, std
+
+
+def count_mate_labels(
+    samples: list[Sample],
+    *,
+    mate_threshold: float = DEFAULT_MATE_THRESHOLD,
+) -> tuple[int, int]:
+    mate = sum(1 for s in samples if is_mate_label(s.vl, threshold=mate_threshold))
+    return mate, len(samples) - mate
 
 
 class NnueDataset:
@@ -520,19 +546,22 @@ class NnueDataset:
         *,
         label_mean: float,
         label_std: float,
+        mate_threshold: float = DEFAULT_MATE_THRESHOLD,
     ) -> None:
         self.samples = samples
         self.label_mean = label_mean
         self.label_std = label_std
+        self.mate_threshold = mate_threshold
 
     def __len__(self) -> int:
         return len(self.samples)
 
-    def __getitem__(self, idx: int) -> tuple[np.ndarray, float, float]:
+    def __getitem__(self, idx: int) -> tuple[np.ndarray, float, float, bool]:
         s = self.samples[idx]
         indices = s.feat_indices if s.feat_indices is not None else fen_to_feature_indices(s.fen)
         target_norm = (s.vl - self.label_mean) / self.label_std
-        return indices, target_norm, s.vl
+        mate = is_mate_label(s.vl, threshold=self.mate_threshold)
+        return indices, target_norm, s.vl, mate
 
 
 class PrecomputedNnueDataset:
@@ -545,25 +574,34 @@ class PrecomputedNnueDataset:
         feat_offsets: np.ndarray,
         targets_norm: np.ndarray,
         targets_raw: np.ndarray,
+        is_mate: np.ndarray,
+        mate_threshold: float = DEFAULT_MATE_THRESHOLD,
     ) -> None:
         self.feat_indices = feat_indices
         self.feat_offsets = feat_offsets
         self.targets_norm = targets_norm
         self.targets_raw = targets_raw
+        self.is_mate = is_mate
+        self.mate_threshold = mate_threshold
 
     def __len__(self) -> int:
         return len(self.targets_norm)
 
-    def __getitem__(self, idx: int) -> tuple[np.ndarray, float, float]:
+    def __getitem__(self, idx: int) -> tuple[np.ndarray, float, float, bool]:
         start = int(self.feat_offsets[idx])
         end = int(self.feat_offsets[idx + 1])
-        return self.feat_indices[start:end], float(self.targets_norm[idx]), float(self.targets_raw[idx])
+        return (
+            self.feat_indices[start:end],
+            float(self.targets_norm[idx]),
+            float(self.targets_raw[idx]),
+            bool(self.is_mate[idx]),
+        )
 
 
-def collate_fn(batch: list[tuple[np.ndarray, float, float]]) -> tuple[Any, ...]:
+def collate_fn(batch: list[tuple[np.ndarray, float, float, bool]]) -> tuple[Any, ...]:
     import torch
 
-    feat_arrays = [feat_indices for feat_indices, _, _ in batch]
+    feat_arrays = [feat_indices for feat_indices, _, _, _ in batch]
     indices_arr = np.concatenate(feat_arrays) if len(feat_arrays) > 1 else feat_arrays[0]
     offsets = np.empty(len(batch), dtype=np.int64)
     offset = 0
@@ -571,14 +609,16 @@ def collate_fn(batch: list[tuple[np.ndarray, float, float]]) -> tuple[Any, ...]:
         offsets[i] = offset
         offset += len(feat_indices)
 
-    targets_norm = np.array([target_norm for _, target_norm, _ in batch], dtype=np.float32)
-    targets_raw = np.array([raw for _, _, raw in batch], dtype=np.float32)
+    targets_norm = np.array([target_norm for _, target_norm, _, _ in batch], dtype=np.float32)
+    targets_raw = np.array([raw for _, _, raw, _ in batch], dtype=np.float32)
+    is_mate = np.array([mate for _, _, _, mate in batch], dtype=np.bool_)
 
     return (
         torch.from_numpy(np.ascontiguousarray(indices_arr, dtype=np.int64)),
         torch.from_numpy(offsets),
         torch.from_numpy(targets_norm),
         torch.from_numpy(targets_raw),
+        torch.from_numpy(is_mate),
     )
 
 
