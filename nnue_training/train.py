@@ -6,7 +6,6 @@ import math
 import sys
 import time
 from pathlib import Path
-from dataclasses import dataclass
 from typing import Any
 
 import yaml
@@ -34,25 +33,6 @@ from labels import DEFAULT_MATE_THRESHOLD
 from quiet import filter_static_samples, format_static_filter_stats
 
 
-@dataclass(frozen=True)
-class LossConfig:
-    mse_weight: float = 0.5
-    ranking_weight: float = 0.5
-    ranking_max_pairs: int = 4096
-
-    @property
-    def use_ranking(self) -> bool:
-        return self.ranking_weight > 0.0
-
-
-def parse_loss_config(train_cfg: dict) -> LossConfig:
-    return LossConfig(
-        mse_weight=float(train_cfg.get("mse_loss_weight", 0.5)),
-        ranking_weight=float(train_cfg.get("ranking_loss_weight", 0.5)),
-        ranking_max_pairs=int(train_cfg.get("ranking_max_pairs", 4096)),
-    )
-
-
 def log_train(message: str = "") -> None:
     """Print to stderr without breaking active tqdm bars."""
     import sys
@@ -74,23 +54,12 @@ def format_epoch_summary(
     is_best: bool,
     epochs_without_improvement: int,
     patience: int,
-    loss_cfg: LossConfig,
 ) -> str:
     lines = [
         "",
         f"── epoch {epoch}/{max_epochs} ({elapsed_s:.1f}s) ──",
         f"  train_loss    {train_loss:.6f}",
         f"  val_loss      {val_loss:.6f}" + ("  ← best" if is_best else ""),
-    ]
-    if loss_cfg.use_ranking:
-        lines.extend(
-            [
-                f"  val_mse       {val_metrics['mse_loss']:.6f}",
-                f"  val_rank      {val_metrics['rank_loss']:.6f}",
-            ]
-        )
-    lines.extend(
-        [
         f"  val_mae_norm  {val_metrics['mae_norm']:.6f}",
         f"  val_rmse_norm {val_metrics['rmse_norm']:.6f}",
         f"  val_mae_vl    {val_metrics['mae_vl']:.2f} (quiet)",
@@ -98,13 +67,12 @@ def format_epoch_summary(
         f"  val_mae_quiet {val_metrics['mae_vl_quiet']:.2f}",
         f"  val_corr_quiet {val_metrics['corr_vl_quiet']:.4f}  "
         f"(n={val_metrics['n_quiet']:,})",
-        ]
-    )
+    ]
     if val_metrics.get("n_mate", 0) > 0:
         lines.extend(
             [
-                f"  val_mate      rank-only n={val_metrics['n_mate']:,}",
-                f"                (|vl|>={val_metrics['mate_threshold']:.0f}, no MSE/corr)",
+                f"  val_mate      excluded n={val_metrics['n_mate']:,}",
+                f"                (|vl|>={val_metrics['mate_threshold']:.0f}, no loss/corr)",
             ]
         )
     if is_best:
@@ -127,25 +95,17 @@ def resolve_path(base: Path, maybe_rel: str) -> Path:
     return p if p.is_absolute() else (base / p).resolve()
 
 
-def _batch_loss(
-    preds_norm,
-    targets_norm,
-    loss_weights,
-    is_mate,
-    loss_cfg: LossConfig,
-):
-    """Return ``(total, mse, ranking)`` for one batch."""
-    from losses import mate_aware_weighted_loss
+def _batch_loss(preds_norm, targets_norm, loss_weights, is_mate):
+    from losses import quiet_weighted_mse
 
-    return mate_aware_weighted_loss(
-        preds_norm,
-        targets_norm,
-        loss_weights,
-        is_mate,
-        mse_weight=loss_cfg.mse_weight,
-        ranking_weight=loss_cfg.ranking_weight,
-        ranking_max_pairs=loss_cfg.ranking_max_pairs,
-    )
+    return quiet_weighted_mse(preds_norm, targets_norm, loss_weights, is_mate)
+
+
+def _quiet_weight_sum(loss_weights, is_mate) -> float:
+    quiet = ~is_mate
+    if not quiet.any():
+        return 0.0
+    return float(loss_weights[quiet].sum().item())
 
 
 def _accumulate_metrics(
@@ -156,42 +116,32 @@ def _accumulate_metrics(
     targets_raw,
     is_mate,
     loss_weights,
-    loss_cfg: LossConfig,
     totals: dict[str, float],
     counts: dict[str, int],
 ) -> None:
-    import torch
-
     quiet = ~is_mate
-    weight_sum = float(loss_weights.sum().item())
-    if weight_sum <= 0:
+    quiet_weight_sum = _quiet_weight_sum(loss_weights, is_mate)
+    if quiet_weight_sum <= 0:
         return
 
-    total, mse, rank = _batch_loss(
-        preds_norm, targets_norm, loss_weights, is_mate, loss_cfg
-    )
-    totals["loss_all"] += total.item() * weight_sum
-    totals["rank_all"] += rank.item() * weight_sum
-    totals["weight_all"] += weight_sum
+    loss = _batch_loss(preds_norm, targets_norm, loss_weights, is_mate)
+    totals["loss_all"] += loss.item() * quiet_weight_sum
+    totals["weight_quiet"] += quiet_weight_sum
 
-    if quiet.any():
-        quiet_weights = loss_weights[quiet]
-        quiet_weight_sum = float(quiet_weights.sum().item())
-        totals["mse_quiet"] += mse.item() * quiet_weight_sum
-        pn = preds_norm[quiet]
-        tn = targets_norm[quiet]
-        pv = preds_vl[quiet]
-        tr = targets_raw[quiet]
-        totals["abs_norm_quiet"] += (quiet_weights * (pn - tn).abs()).sum().item()
-        totals["sq_norm_quiet"] += (quiet_weights * (pn - tn) ** 2).sum().item()
-        totals["abs_vl_quiet"] += (quiet_weights * (pv - tr).abs()).sum().item()
-        totals["sum_pred_quiet"] += (quiet_weights * pv).sum().item()
-        totals["sum_true_quiet"] += (quiet_weights * tr).sum().item()
-        totals["sum_pred_sq_quiet"] += (quiet_weights * pv * pv).sum().item()
-        totals["sum_true_sq_quiet"] += (quiet_weights * tr * tr).sum().item()
-        totals["sum_cross_quiet"] += (quiet_weights * pv * tr).sum().item()
-        totals["weight_quiet"] += quiet_weight_sum
-        counts["quiet"] += int(quiet.sum().item())
+    pn = preds_norm[quiet]
+    tn = targets_norm[quiet]
+    pv = preds_vl[quiet]
+    tr = targets_raw[quiet]
+    quiet_weights = loss_weights[quiet]
+    totals["abs_norm_quiet"] += (quiet_weights * (pn - tn).abs()).sum().item()
+    totals["sq_norm_quiet"] += (quiet_weights * (pn - tn) ** 2).sum().item()
+    totals["abs_vl_quiet"] += (quiet_weights * (pv - tr).abs()).sum().item()
+    totals["sum_pred_quiet"] += (quiet_weights * pv).sum().item()
+    totals["sum_true_quiet"] += (quiet_weights * tr).sum().item()
+    totals["sum_pred_sq_quiet"] += (quiet_weights * pv * pv).sum().item()
+    totals["sum_true_sq_quiet"] += (quiet_weights * tr * tr).sum().item()
+    totals["sum_cross_quiet"] += (quiet_weights * pv * tr).sum().item()
+    counts["quiet"] += int(quiet.sum().item())
 
     counts["mate"] = counts.get("mate", 0) + int(is_mate.sum().item())
     counts["all"] += int(preds_norm.size(0))
@@ -218,14 +168,11 @@ def _finalize_metrics(
 ) -> dict[str, float]:
     n_quiet = counts.get("quiet", 0)
     n_mate = counts.get("mate", 0)
-    weight_all = totals.get("weight_all", 0.0)
     weight_quiet = totals.get("weight_quiet", 0.0)
 
-    if weight_all <= 0:
+    if weight_quiet <= 0:
         return {
             "loss": math.inf,
-            "mse_loss": math.inf,
-            "rank_loss": math.inf,
             "mae_norm": math.inf,
             "rmse_norm": math.inf,
             "mae_vl": math.inf,
@@ -241,17 +188,15 @@ def _finalize_metrics(
         }
 
     return {
-        "loss": totals["loss_all"] / weight_all,
-        "mse_loss": totals["mse_quiet"] / max(weight_quiet, 1e-12),
-        "rank_loss": totals["rank_all"] / weight_all,
-        "mae_norm": totals["abs_norm_quiet"] / max(weight_quiet, 1e-12),
-        "rmse_norm": math.sqrt(totals["sq_norm_quiet"] / max(weight_quiet, 1e-12)),
-        "mae_vl": totals["abs_vl_quiet"] / max(weight_quiet, 1e-12),
+        "loss": totals["loss_all"] / weight_quiet,
+        "mae_norm": totals["abs_norm_quiet"] / weight_quiet,
+        "rmse_norm": math.sqrt(totals["sq_norm_quiet"] / weight_quiet),
+        "mae_vl": totals["abs_vl_quiet"] / weight_quiet,
         "corr_vl": _weighted_corr(totals, "quiet"),
-        "loss_quiet": totals["loss_all"] / weight_all,
-        "mae_norm_quiet": totals["abs_norm_quiet"] / max(weight_quiet, 1e-12),
-        "rmse_norm_quiet": math.sqrt(totals["sq_norm_quiet"] / max(weight_quiet, 1e-12)),
-        "mae_vl_quiet": totals["abs_vl_quiet"] / max(weight_quiet, 1e-12),
+        "loss_quiet": totals["loss_all"] / weight_quiet,
+        "mae_norm_quiet": totals["abs_norm_quiet"] / weight_quiet,
+        "rmse_norm_quiet": math.sqrt(totals["sq_norm_quiet"] / weight_quiet),
+        "mae_vl_quiet": totals["abs_vl_quiet"] / weight_quiet,
         "corr_vl_quiet": _weighted_corr(totals, "quiet"),
         "n_mate": n_mate,
         "n_quiet": n_quiet,
@@ -263,7 +208,6 @@ def evaluate(
     model: Any,
     loader,
     device: Any,
-    loss_cfg: LossConfig,
     *,
     label_mean: float,
     label_std: float,
@@ -278,7 +222,7 @@ def evaluate(
 
     model.eval()
     totals: dict[str, float] = {k: 0.0 for k in (
-        "loss_all", "mse_quiet", "rank_all", "weight_all", "weight_quiet",
+        "loss_all", "weight_quiet",
         "abs_norm_quiet", "sq_norm_quiet", "abs_vl_quiet",
         "sum_pred_quiet", "sum_true_quiet",
         "sum_pred_sq_quiet", "sum_true_sq_quiet", "sum_cross_quiet",
@@ -318,7 +262,6 @@ def evaluate(
                     targets_raw=targets_raw,
                     is_mate=is_mate,
                     loss_weights=loss_weights,
-                    loss_cfg=loss_cfg,
                     totals=totals,
                     counts=counts,
                 )
@@ -367,7 +310,6 @@ def train_epoch(
     loader,
     device: Any,
     optimizer,
-    loss_cfg: LossConfig,
     *,
     epoch: int,
     max_epochs: int,
@@ -379,7 +321,7 @@ def train_epoch(
 
     model.train()
     total_loss = 0.0
-    n = 0
+    n = 0.0
     non_blocking = device.type == "cuda"
     batch_iter = (
         tqdm(
@@ -404,26 +346,26 @@ def train_epoch(
 
             optimizer.zero_grad(set_to_none=True)
             preds = model(indices, offsets)
-            loss, _, _ = _batch_loss(preds, targets_norm, loss_weights, is_mate, loss_cfg)
+            loss = _batch_loss(preds, targets_norm, loss_weights, is_mate)
             loss.backward()
             optimizer.step()
 
-            batch_weight = float(loss_weights.sum().item())
-            if batch_weight > 0:
-                total_loss += loss.item() * batch_weight
-                n += batch_weight
+            quiet_weight = _quiet_weight_sum(loss_weights, is_mate)
+            if quiet_weight > 0:
+                total_loss += loss.item() * quiet_weight
+                n += quiet_weight
 
             if use_tqdm and isinstance(batch_iter, tqdm):
                 batch_iter.set_postfix(
-                    loss=f"{total_loss / max(n, 1):.6f}",
-                    samples=f"{n:,}",
+                    loss=f"{total_loss / max(n, 1e-12):.6f}",
+                    samples=f"{int(n):,}",
                     refresh=False,
                 )
     finally:
         if use_tqdm and isinstance(batch_iter, tqdm):
             batch_iter.close()
 
-    return total_loss / max(n, 1)
+    return total_loss / max(n, 1e-12)
 
 
 def main() -> None:
@@ -550,8 +492,7 @@ def main() -> None:
     )
     print(
         f"[label] mate handling: quiet_only={quiet_only}  remap={mate_remap}  "
-        f"zscore_exclude={exclude_mate_from_zscore}  "
-        f"loss=quiet(MSE+rank)+mate(rank-only)",
+        f"zscore_exclude={exclude_mate_from_zscore}  loss=quiet(MSE only)",
         flush=True,
     )
     print("[label]               inference: pure NNUE when loaded, else pure PST", flush=True)
@@ -574,7 +515,6 @@ def main() -> None:
     else:
         train_pool_before = sum(s.orig_count for s in train_samples)
         val_pool_before = sum(s.orig_count for s in val_samples)
-        pool_total_before = train_pool_before + val_pool_before
 
     print(
         f"[data] loss weights: sqrt(orig_count / pool_before)  "
@@ -664,15 +604,7 @@ def main() -> None:
         lr=train_cfg["lr"],
         weight_decay=train_cfg.get("weight_decay", 0.0),
     )
-    loss_cfg = parse_loss_config(train_cfg)
-    if loss_cfg.use_ranking:
-        log_train(
-            f"[loss] quiet: {loss_cfg.mse_weight:.2f}*MSE + {loss_cfg.ranking_weight:.2f}*rank  "
-            f"mate: {loss_cfg.ranking_weight:.2f}*rank-only  "
-            f"(max_pairs={loss_cfg.ranking_max_pairs}, dedupe-weighted)"
-        )
-    else:
-        log_train(f"[loss] pure MSE (ranking_weight=0)")
+    log_train("[loss] weighted MSE on quiet samples (dedupe sqrt weights)")
 
     best_val = math.inf
     max_epochs = int(train_cfg.get("max_epochs", train_cfg.get("epochs", 384)))
@@ -695,7 +627,6 @@ def main() -> None:
             train_loader,
             device,
             optimizer,
-            loss_cfg,
             epoch=epoch,
             max_epochs=max_epochs,
             use_tqdm=use_tqdm,
@@ -704,7 +635,6 @@ def main() -> None:
             model,
             val_loader,
             device,
-            loss_cfg,
             label_mean=label_mean,
             label_std=label_std,
             mate_threshold=mate_threshold,
@@ -755,7 +685,6 @@ def main() -> None:
                 is_best=is_best,
                 epochs_without_improvement=epochs_without_improvement,
                 patience=patience,
-                loss_cfg=loss_cfg,
             )
         )
 

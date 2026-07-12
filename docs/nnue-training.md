@@ -90,23 +90,14 @@ python train.py --config configs/full_gpu.yaml
 8. **CSR 打包** — 将特征压成紧凑数组
 9. **训练循环** — 全部样本参与 loss；早停与 best checkpoint 看全量 `val_loss`
 
-损失为 **50% MSE + 50% 排序损失**（默认权重，可配置），并按去重占比加权：
+损失为 **加权 MSE**（z-score 空间，quiet 样本；将杀不参与 loss/corr），权重 `sqrt(orig_count / 去重前总行数)`。
 
-| 分量 | 样本 | 空间 | 作用 |
-|------|------|------|------|
-| MSE | 非将杀（quiet） | z-score | 约束预测量级 |
-| 排序（RankNet logistic） | **全部** | z-score | batch 内 pairwise，改善相对顺序 |
-| 将杀（\|vl\|≥阈值） | 仅排序 | z-score | 不参与 MSE，不参与 corr 统计 |
-
-**去重损失权重**：`loss_weight = sqrt(orig_count / 去重前总行数)`（`orig_count` 为合并到该 FEN 的原始行数）。相比线性占比，sqrt 可减弱高频 FEN 的主导，使权重更均衡。全局去重后再划分 train/val 时，分母为**整个数据池**去重前的行数。
-
-配置项（`train` 段）：
-
-| 参数 | 默认 | 说明 |
+| 样本 | 损失 | 说明 |
 |------|------|------|
-| `mse_loss_weight` | `0.5` | MSE 权重 |
-| `ranking_loss_weight` | `0.5` | 排序损失权重；设为 `0` 则退化为纯 MSE |
-| `ranking_max_pairs` | `4096` | 每个 batch 最多采样的 pairwise 对数 |
+| 非将杀（quiet） | 加权 MSE | 约束预测量级 |
+| 将杀（\|vl\|≥阈值） | 不参与 | 不计 loss，不参与 corr 统计 |
+
+**去重损失权重**：`loss_weight = sqrt(orig_count / 去重前总行数)`。全局去重后再划分 train/val 时，分母为**整个数据池**去重前的行数。
 
 ### 静态局面过滤（quiet_only）
 
@@ -168,8 +159,8 @@ epoch 汇总通过 `tqdm.write` 输出，不与进度条抢行。
 | 字段 | 含义 |
 |------|------|
 | `train N/M` | 当前 epoch / 总 epoch；进度条为 batch 进度 |
-| `loss` | 截至当前 batch 的**训练集** running average 组合损失 | 
-| `samples` | 当前 epoch 已处理的训练样本数 |
+| `loss` | 截至当前 batch 的**训练集** running average MSE（quiet，加权） |
+| `samples` | 当前 epoch 已参与 loss 的 quiet 样本权重和 |
 
 验证阶段 tqdm 显示 `val N/M`，不单独打印逐步 loss。
 
@@ -177,10 +168,8 @@ epoch 汇总通过 `tqdm.write` 输出，不与进度条抢行。
 
 | 指标 | 空间 | 含义 | 参考 |
 |------|------|------|------|
-| `train_loss` | 归一化 | 训练集组合损失 | 越小越好 |
-| `val_loss` | 归一化 | 验证集组合损失；**早停与 best.pt 依据** | 越小越好 |
-| `val_mse` | 归一化 | 验证集 MSE 分量（启用排序时打印） | 越小越好 |
-| `val_rank` | 归一化 | 验证集排序损失分量（启用排序时打印） | 越小越好 |
+| `train_loss` | 归一化 | 训练集加权 MSE | 越小越好 |
+| `val_loss` | 归一化 | 验证集加权 MSE；**早停与 best.pt 依据** | 越小越好 |
 | `val_mae_norm` | 归一化 | 验证集平均绝对误差 `\|pred_norm - target_norm\|` | 越小越好 |
 | `val_rmse_norm` | 归一化 | 验证集 RMSE | 越小越好 |
 | `val_mae_vl` | 原始 vl | quiet 子集加权 MAE | 越小越好 |
@@ -208,9 +197,6 @@ pred_vl = pred_norm * label_std + label_mean
 | `batch_size` | 2048 | 16384 | |
 | `lr` | 0.001 | 0.001 | Adam |
 | `weight_decay` | 0.0 | 0.0 | |
-| `mse_loss_weight` | 0.5 | 0.5 | MSE 分量权重 |
-| `ranking_loss_weight` | 0.5 | 0.5 | 排序损失权重 |
-| `ranking_max_pairs` | 4096 | 8192 | 每 batch pairwise 采样上限 |
 | `num_workers` | 4 | auto | DataLoader；预计算大数据集建议 0 |
 | `prefetch_factor` | 2 | 4 | `num_workers > 0` 时生效 |
 

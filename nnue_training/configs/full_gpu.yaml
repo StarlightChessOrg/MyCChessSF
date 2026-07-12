@@ -24,9 +24,6 @@ train:
   early_stopping_patience: 32
   lr: 0.001
   weight_decay: 0.0
-  mse_loss_weight: 0.5
-  ranking_loss_weight: 0.5
-  ranking_max_pairs: 8192
   num_workers: auto
   prefetch_factor: 4
   precompute_features: true
