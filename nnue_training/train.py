@@ -189,7 +189,11 @@ def main() -> None:
     device = torch.device(train_cfg.get("device", "cpu"))
 
     pattern = data_cfg.get("pattern", DEFAULT_DATA_PATTERN)
-    print(f"[data] source={data_source}  pattern={pattern!r}", flush=True)
+    load_workers = int(data_cfg.get("load_workers", 0))
+    print(
+        f"[data] source={data_source}  pattern={pattern!r}  load_workers={load_workers or 'auto'}",
+        flush=True,
+    )
 
     if "val_ratio" in data_cfg:
         train_samples, val_samples, skipped = split_samples_by_ratio(
@@ -197,12 +201,14 @@ def main() -> None:
             pattern,
             float(data_cfg["val_ratio"]),
             seed=int(data_cfg.get("val_seed", 42)),
+            load_workers=load_workers,
         )
     else:
         train_samples, val_samples, skipped = split_samples(
             data_source,
             pattern,
             data_cfg.get("val_workers", [30, 31]),
+            load_workers=load_workers,
         )
     print(f"[data] train={len(train_samples):,}  val={len(val_samples):,}  skipped={skipped:,}", flush=True)
 

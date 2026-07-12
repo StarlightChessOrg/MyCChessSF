@@ -4,6 +4,7 @@ data:
   pattern: "merged.txt"
   val_ratio: 0.01
   val_seed: 42
+  load_workers: 8
 
 model:
   n_features: 1260
