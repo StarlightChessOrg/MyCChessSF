@@ -21,6 +21,7 @@ from data.dataset import (
     compute_zscore_stats,
     make_dataloader,
     split_samples,
+    split_samples_by_ratio,
 )
 from features.xqwl_psq import N_FEATURES
 from model.nnue import NNUE
@@ -187,12 +188,22 @@ def main() -> None:
     ckpt_dir = resolve_path(ROOT, train_cfg.get("checkpoint_dir", "checkpoints"))
     device = torch.device(train_cfg.get("device", "cpu"))
 
-    print(f"[data] source={data_source}")
-    train_samples, val_samples, skipped = split_samples(
-        data_source,
-        data_cfg.get("pattern", DEFAULT_DATA_PATTERN),
-        data_cfg.get("val_workers", [30, 31]),
-    )
+    pattern = data_cfg.get("pattern", DEFAULT_DATA_PATTERN)
+    print(f"[data] source={data_source}  pattern={pattern!r}")
+
+    if "val_ratio" in data_cfg:
+        train_samples, val_samples, skipped = split_samples_by_ratio(
+            data_source,
+            pattern,
+            float(data_cfg["val_ratio"]),
+            seed=int(data_cfg.get("val_seed", 42)),
+        )
+    else:
+        train_samples, val_samples, skipped = split_samples(
+            data_source,
+            pattern,
+            data_cfg.get("val_workers", [30, 31]),
+        )
     print(f"[data] train={len(train_samples)}  val={len(val_samples)}  skipped={skipped}")
 
     label_mean, label_std = compute_zscore_stats(train_samples)

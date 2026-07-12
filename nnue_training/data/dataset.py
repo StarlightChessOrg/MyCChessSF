@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import glob
+import random
 import re
 import sys
 from dataclasses import dataclass
@@ -97,6 +98,31 @@ def split_samples(
                     bucket.append(s)
                 elif line.strip():
                     skipped += 1
+    return train_set, val_set, skipped
+
+
+def split_samples_by_ratio(
+    source: str | Path,
+    pattern: str,
+    val_ratio: float,
+    *,
+    seed: int = 42,
+) -> tuple[list[Sample], list[Sample], int]:
+    if not 0.0 < val_ratio < 1.0:
+        raise ValueError(f"val_ratio must be in (0, 1), got {val_ratio}")
+
+    samples, skipped = load_samples(source, pattern)
+    if not samples:
+        raise ValueError(f"No samples found under {source} with pattern {pattern!r}")
+
+    rng = random.Random(seed)
+    indices = list(range(len(samples)))
+    rng.shuffle(indices)
+    n_val = max(1, int(len(samples) * val_ratio))
+    val_indices = set(indices[:n_val])
+
+    train_set = [samples[i] for i in range(len(samples)) if i not in val_indices]
+    val_set = [samples[i] for i in range(len(samples)) if i in val_indices]
     return train_set, val_set, skipped
 
 

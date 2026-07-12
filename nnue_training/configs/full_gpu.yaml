@@ -1,0 +1,24 @@
+# 正式 GPU 训练：约 1090 万行 merged.txt（workspace 根目录 nnue_data/）
+data:
+  source: ../../nnue_data
+  pattern: "merged.txt"
+  val_ratio: 0.01
+  val_seed: 42
+
+model:
+  n_features: 1260
+  l1: 512
+  l2: 32
+  l3: 32
+
+train:
+  batch_size: 8192
+  max_epochs: 384
+  early_stopping_patience: 32
+  lr: 0.001
+  weight_decay: 0.0
+  num_workers: 8
+  prefetch_factor: 4
+  device: cuda
+  checkpoint_dir: checkpoints/full_gpu
+  log_every: 200
