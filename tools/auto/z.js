@@ -4,15 +4,19 @@
  * 依赖象眸 SF 桥接服务（Chess98 兼容 HTTP :9494）：
  *   mycchess-xiangqi-bridge --think-ms 1000
  *
+ * **桥接不会打开浏览器**；本脚本 (Windows + Edge) 负责网页自动化。
+ *
  * 环境变量（可选）：
+ *   XIANGQI_URL         默认 https://play.xiangqi.com/computer
  *   OPPONENT_LEVEL      相弈人机等级 1–9（默认 9）
- *   BRIDGE_HOST         默认 127.0.0.1
+ *   BRIDGE_HOST         默认 127.0.0.1（WSL 桥接失败时改为 WSL IP）
  *   BRIDGE_PORT         默认 9494
  *   USER_PROFILE_DIR    Edge 用户数据目录（Windows）
  *   KILL_EDGE           设为 1 时启动前 taskkill msedge（默认 0）
  */
 
 const OPPONENT_LEVEL = Math.max(1, Math.min(9, Number(process.env.OPPONENT_LEVEL || 9)))
+const XIANGQI_URL = process.env.XIANGQI_URL || "https://play.xiangqi.com/computer"
 const BRIDGE_HOST = process.env.BRIDGE_HOST || "127.0.0.1"
 const BRIDGE_PORT = Number(process.env.BRIDGE_PORT || 9494)
 const USER_PROFILE_DIR =
@@ -20,7 +24,7 @@ const USER_PROFILE_DIR =
   `${process.env.LOCALAPPDATA || process.env.HOME}/Microsoft/Edge/User Data`
 const KILL_EDGE = process.env.KILL_EDGE === "1"
 
-const { Builder, By } = require("selenium-webdriver")
+const { Builder, By, until } = require("selenium-webdriver")
 const edge = require("selenium-webdriver/edge")
 const http = require("http")
 const { exec } = require("child_process")
@@ -44,26 +48,170 @@ let state = 0
 
 function httpGet(path) {
   return new Promise((resolve, reject) => {
-    http.get(`${BRIDGE_BASE}${path}`, (res) => {
+    const req = http.get(`${BRIDGE_BASE}${path}`, (res) => {
       let data = ""
       res.on("data", (chunk) => {
         data += chunk
       })
       res.on("end", () => resolve(data.trim()))
-    }).on("error", reject)
+    })
+    req.on("error", reject)
+    req.setTimeout(5000, () => {
+      req.destroy(new Error(`timeout GET ${path}`))
+    })
   })
 }
 
 function httpNotify(path) {
   return new Promise((resolve, reject) => {
-    http
+    const req = http
       .request(`${BRIDGE_BASE}${path}`, { method: "GET" }, (res) => {
         res.on("data", () => {})
         res.on("end", resolve)
       })
       .on("error", reject)
-      .end()
+    req.setTimeout(5000, () => {
+      req.destroy(new Error(`timeout notify ${path}`))
+    })
+    req.end()
   })
+}
+
+async function pingBridge() {
+  console.log(`[auto] 检测桥接 ${BRIDGE_BASE} ...`)
+  try {
+    const raw = await httpGet("/computer")
+    console.log(`[auto] 桥接 OK  /computer -> '${raw}'`)
+    return true
+  } catch (err) {
+    console.error("[auto] 无法连接象眸桥接服务:", err.message || err)
+    console.error("[auto] 请先在 WSL/Linux 启动: ./deployment/bin/mycchess-xiangqi-bridge")
+    console.error("[auto] 若桥在 WSL、本脚本在 Windows，设置: set BRIDGE_HOST=<WSL的IP>")
+    console.error("[auto] WSL IP: wsl hostname -I")
+    return false
+  }
+}
+
+async function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms))
+}
+
+async function clickFirst(driver, selectors, label) {
+  for (const sel of selectors) {
+    try {
+      const el = await driver.findElement(By.css(sel))
+      await el.click()
+      console.log(`[auto] 点击 ${label}: ${sel}`)
+      return true
+    } catch {
+      /* try next */
+    }
+  }
+  return false
+}
+
+async function clickByXPath(driver, xpaths, label) {
+  for (const xp of xpaths) {
+    try {
+      const el = await driver.findElement(By.xpath(xp))
+      await el.click()
+      console.log(`[auto] 点击 ${label}: ${xp}`)
+      return true
+    } catch {
+      /* try next */
+    }
+  }
+  return false
+}
+
+async function waitForBoard(driver, timeoutMs = 120000) {
+  console.log("[auto] 等待棋盘 #game-grid ...")
+  await driver.wait(until.elementLocated(By.css("#game-grid")), timeoutMs)
+  await sleep(800)
+}
+
+/** 新版 https://play.xiangqi.com/computer */
+async function openComputerPage(driver) {
+  console.log(`[auto] 打开 ${XIANGQI_URL}`)
+  await driver.get(XIANGQI_URL)
+  await sleep(1500)
+
+  const botLegacy = `.all-bots :nth-child(${OPPONENT_LEVEL})`
+  if (await clickFirst(driver, [botLegacy], `bot L${OPPONENT_LEVEL}`)) {
+    /* legacy list */
+  } else {
+    const levelRe = `Level ${OPPONENT_LEVEL}`
+    const okBot = await clickByXPath(
+      driver,
+      [
+        `//*[contains(@class,'bot') and contains(.,'${levelRe}')]`,
+        `//*[contains(.,'(${levelRe}') or contains(.,'${levelRe}')][not(self::script)]`,
+      ],
+      `bot ${levelRe}`
+    )
+    if (!okBot) {
+      console.warn(`[auto] 未找到等级 ${OPPONENT_LEVEL}，使用页面默认 bot`)
+    }
+  }
+
+  await sleep(400)
+  const okRed = await clickByXPath(
+    driver,
+    [
+      "//button[contains(.,'Red')]",
+      "//*[self::button or self::div][normalize-space(text())='Red']",
+      "//label[contains(.,'Red')]",
+    ],
+    "执红"
+  )
+  if (!okRed) {
+    console.warn("[auto] 未点到 Red，可能默认已是红方")
+  }
+
+  await sleep(300)
+  const okPlay = await clickByXPath(
+    driver,
+    [
+      "//button[normalize-space()='Play']",
+      "//button[contains(.,'Play')]",
+      ".button-wrapper button:nth-child(1)",
+    ],
+    "开始对局"
+  )
+  if (!okPlay) {
+    throw new Error("找不到 Play 按钮；相弈页面 DOM 可能已变更")
+  }
+
+  await waitForBoard(driver)
+}
+
+/** 旧版首页入口（回退） */
+async function openLegacyHome(driver) {
+  console.log("[auto] 回退旧版首页流程 play.xiangqi.com/")
+  await driver.get("https://play.xiangqi.com/")
+  await driver.findElement(By.css("div.btn-list > div:nth-child(2)")).click()
+  await driver.findElement(By.css(`.all-bots :nth-child(${OPPONENT_LEVEL})`)).click()
+  await driver.findElement(By.css(".button-wrapper button:nth-child(1)")).click()
+  const waitLoading = async () => {
+    try {
+      await driver.findElement(By.css(".body"))
+      await sleep(200)
+      await waitLoading()
+    } catch {
+      return
+    }
+  }
+  await waitLoading()
+  await waitForBoard(driver)
+}
+
+async function openXiangqiGame(driver) {
+  try {
+    await openComputerPage(driver)
+  } catch (err) {
+    console.warn("[auto] /computer 流程失败:", err.message || err)
+    await openLegacyHome(driver)
+  }
 }
 
 async function isEndGame(driver) {
@@ -76,7 +224,14 @@ async function isEndGame(driver) {
 
 async function getEngineMove(driver) {
   await isEndGame(driver)
-  const raw = await httpGet("/computer")
+  let raw
+  try {
+    raw = await httpGet("/computer")
+  } catch (err) {
+    console.error("[auto] 桥接请求失败:", err.message || err)
+    await sleep(1000)
+    return
+  }
   const digits = raw.replace(/\D/g, "")
   const data = digits.length >= 4 ? digits.slice(-4) : digits
   if (data !== engineLastMove && data.length === 4 && data !== "0000") {
@@ -87,7 +242,7 @@ async function getEngineMove(driver) {
     const waitBoardChange = async () => {
       const currentBoard = await getWebBoard(driver)
       if (currentBoard.toString() !== webLastBoard.toString()) return
-      await driver.sleep(200)
+      await sleep(200)
       await waitBoardChange()
     }
     await waitBoardChange()
@@ -100,7 +255,7 @@ async function getEngineMove(driver) {
     state++
     console.log("==========================")
   } else {
-    await driver.sleep(200)
+    await sleep(200)
   }
 }
 
@@ -164,7 +319,7 @@ async function doMoveOnWeb(driver) {
     webLastBoard[9 - x1][y1] = 1
     webLastBoard[9 - x2][y2] = 0
     console.error("[auto] 网页着法失败，重试")
-    await driver.sleep(400)
+    await sleep(400)
     await doMoveOnWeb(driver)
   }
 }
@@ -236,7 +391,7 @@ async function sendOpponentMove(move) {
   }
   console.log("[auto] 回传桥接", moveString)
   await httpNotify(`/move?playermove=${moveString}`)
-  await new Promise((r) => setTimeout(r, 300))
+  await sleep(300)
 }
 
 async function initDriver() {
@@ -249,40 +404,26 @@ async function initDriver() {
   return new Builder().forBrowser("MicrosoftEdge").setEdgeOptions(options).build()
 }
 
-async function openXiangqiGame(driver) {
-  await driver.get("https://play.xiangqi.com/")
-  await driver.findElement(By.css("div.btn-list > div:nth-child(2)")).click()
-  await driver.findElement(By.css(`.all-bots :nth-child(${OPPONENT_LEVEL})`)).click()
-  await driver.findElement(By.css(".button-wrapper button:nth-child(1)")).click()
-  const waitLoading = async () => {
-    try {
-      await driver.findElement(By.css(".body"))
-      await driver.sleep(200)
-      await waitLoading()
-    } catch {
-      return
-    }
-  }
-  await waitLoading()
-  await driver.sleep(500)
-}
-
 async function run() {
   const startDriver = async () => {
-    console.log(`[auto] 相弈等级=${OPPONENT_LEVEL}  bridge=${BRIDGE_BASE}`)
+    if (!(await pingBridge())) {
+      process.exit(1)
+    }
+    console.log(`[auto] 相弈等级=${OPPONENT_LEVEL}  url=${XIANGQI_URL}`)
     const driver = await initDriver()
     try {
       await openXiangqiGame(driver)
     } catch (err) {
-      console.error("[auto] 无法打开相弈象棋", err)
+      console.error("[auto] 无法打开相弈象棋:", err.message || err)
       await driver.quit()
       process.exit(1)
     }
+    console.log("[auto] 对局已开始，轮询引擎着法…")
     while (true) {
       const prev = state
       await getEngineMove(driver)
       while (state === prev) {
-        await driver.sleep(200)
+        await sleep(200)
         await getEngineMove(driver)
       }
     }

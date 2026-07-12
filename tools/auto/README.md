@@ -65,7 +65,8 @@ npm start
 | 变量 | 默认 | 说明 |
 |------|------|------|
 | `OPPONENT_LEVEL` | `9` | 相弈 bot 等级（1–9） |
-| `BRIDGE_HOST` | `127.0.0.1` | 引擎桥地址 |
+| `XIANGQI_URL` | `https://play.xiangqi.com/computer` | 人机对战页 |
+| `BRIDGE_HOST` | `127.0.0.1` | 引擎桥地址（WSL 桥接失败时用 WSL IP） |
 | `BRIDGE_PORT` | `9494` | 引擎桥端口 |
 | `USER_PROFILE_DIR` | Edge 用户目录 | 浏览器 Profile（登录态） |
 | `KILL_EDGE` | `0` | 设为 `1` 时启动前强杀 Edge（慎用） |
@@ -93,9 +94,17 @@ Python 桥接：`mycchess_sf/xiangqi_auto_bridge.py`
 
 ## 常见问题
 
-- **桥接无着法**：确认 `xqwlight_core` 已编译、BOOK/NNUE 路径正确；看终端 `[bridge] engine ->` 日志。
-- **网页着法失败**：相弈 DOM 变更会导致选择器失效，需更新 `z.js` 中 `#game-grid` 相关 CSS。
-- **Edge 打不开**：检查 `USER_PROFILE_DIR`；勿与其他 Edge 实例共用 Profile，或关闭 `KILL_EDGE`。
+- **只开了 bridge、网页没反应**：正常。桥接是 HTTP 服务端，**必须另开 Windows PowerShell** 运行 `npm start`（见上文终端 B）。WSL 里只跑 bridge 不会打开 [play.xiangqi.com/computer](https://play.xiangqi.com/computer)。
+- **Windows 连不上 :9494**：WSL 桥接时，PowerShell 执行 `wsl hostname -I` 取 IP，设 `$env:BRIDGE_HOST = "<IP>"` 再 `npm start`。
+- **桥接无着法**：确认 `xqwlight_core` 已编译、BOOK/NNUE 路径正确；看 `[bridge] engine ->` 日志。
+- **网页着法失败**：相弈 DOM 变更会导致选择器失效；可设 `XIANGQI_URL=https://play.xiangqi.com/computer`。
+- **Edge 打不开**：检查 `USER_PROFILE_DIR`；勿与其他 Edge 实例共用 Profile。
+
+诊断脚本（WSL/Linux）：
+
+```bash
+bash scripts/diagnose_xiangqi_auto.sh
+```
 
 ## 与本地网页对弈的区别
 

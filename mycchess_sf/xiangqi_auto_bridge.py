@@ -257,7 +257,18 @@ def main() -> None:
         f"(engine={args.engine_color}, think={args.think_ms}ms)",
         flush=True,
     )
-    print("[bridge] 启动 tools/auto/z.js 连接相弈象棋", flush=True)
+    print(
+        "[bridge] 等待 Selenium 连接（本进程不会打开 play.xiangqi.com）",
+        flush=True,
+    )
+    print(
+        "[bridge] Windows: cd deployment\\tools\\auto && npm install && npm start",
+        flush=True,
+    )
+    print(
+        "[bridge] 诊断: bash scripts/diagnose_xiangqi_auto.sh",
+        flush=True,
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:
