@@ -62,6 +62,21 @@ const int SINGULAR_MIN_DEPTH = 6;
 const int SINGULAR_MARGIN = 12;
 const int BOOK_MAX_ENTRIES = 5000000; // max opening-book lines loaded into RAM
 
+// staticEval-driven pruning (XQWL centipawn scale)
+const int FUTILITY_MARGIN_BASE = 180;
+const int FUTILITY_MARGIN_DEPTH = 90;
+const int RAZOR_MARGIN_BASE = 320;
+const int RAZOR_MARGIN_DEPTH = 80;
+const int REVERSE_FUT_MARGIN_BASE = 200;
+const int REVERSE_FUT_MARGIN_DEPTH = 80;
+const int NULL_STATIC_MARGIN_DEPTH = 45;
+const int NULL_STATIC_MARGIN_IMPROVING = 80;
+const int QCAP_FUTILITY_MARGIN = 180;
+const int LMP_MOVE_DIV = 2;
+const int FUTILITY_MAX_DEPTH = 6;
+const int RAZOR_MAX_DEPTH = 4;
+const int LMP_MAX_DEPTH = 5;
+
 // Dynamic PST blend (XQWL cucvlPiecePos only; see xqwl_preeval.inc)
 const int PST_MIDGAME_TOTAL = 66;
 const int PST_ATTACK_CAP = 8;

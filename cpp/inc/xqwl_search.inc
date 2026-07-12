@@ -89,6 +89,41 @@ static inline int XqwlEvalOrTt(int ply, short ttEval, XqwlEvalMode mode) {
   return vl;
 }
 
+static inline int XqwlStaticEval(int ply) { return g_xqwl_sc->staticEval[ply]; }
+
+static inline BOOL XqwlInScoreMateZone(int vl) { return vl > WIN_VALUE || vl < -WIN_VALUE; }
+
+static inline BOOL XqwlImproving(int ply) {
+  return ply >= 2 && g_xqwl_sc->staticEval[ply] > g_xqwl_sc->staticEval[ply - 2];
+}
+
+static inline BOOL XqwlOpponentWorsening(int ply) {
+  return ply >= 1 && g_xqwl_sc->staticEval[ply] > -g_xqwl_sc->staticEval[ply - 1];
+}
+
+static inline int XqwlFutilityMargin(int depth, BOOL improving, BOOL oppWorsening) {
+  int m = FUTILITY_MARGIN_BASE + FUTILITY_MARGIN_DEPTH * depth;
+  if (improving) {
+    m -= m / 3;
+  }
+  if (oppWorsening) {
+    m -= m / 8;
+  }
+  return m;
+}
+
+static inline int XqwlCaptureValueCp(BYTE victim) {
+  if (!victim) {
+    return 0;
+  }
+  const int kind = (victim < 16) ? static_cast<int>(victim) - 8 : static_cast<int>(victim) - 16;
+  static const int cp[7] = {0, 200, 200, 450, 550, 450, 100};
+  if (kind < 0 || kind > 6) {
+    return 0;
+  }
+  return cp[kind];
+}
+
 /** Search/quiescence eval: NNUE when loaded, else PST ``Evaluate()``. */
 inline int XqwlEvalForSearch(const PositionStruct &pos, XqwlEvalMode mode = XqwlEvalMode::Raw) {
   return XqwlComputeEval(pos, mode);
@@ -235,7 +270,7 @@ static int ProbeHash(int vlAlpha, int vlBeta, int nDepth, int &mv, short *pStati
     return -MATE_VALUE;
   }
   mv = hsh.wmv;
-  if (pStaticEval != nullptr && hsh.ucDepth > 0) {
+  if (pStaticEval != nullptr) {
     *pStaticEval = hsh.sEval;
   }
   bMate = FALSE;
@@ -501,6 +536,12 @@ static int SearchQuiesc(int vlAlpha, int vlBeta) {
   }
 
   for (i = 0; i < nGenMoves; i++) {
+    if (!XQWL_SEARCH_POS.InCheck() && vlBest > -WIN_VALUE) {
+      const int capCp = XqwlCaptureValueCp(XQWL_SEARCH_POS.ucpcSquares[DST(mvs[i])]);
+      if (vlBest + capCp + QCAP_FUTILITY_MARGIN <= vlAlpha) {
+        continue;
+      }
+    }
     if (XqwlSearchMakeMove(mvs[i])) {
       vl = -SearchQuiesc(-vlBeta, -vlAlpha);
       XqwlSearchUndoMakeMove();
@@ -557,22 +598,44 @@ static int SearchFull(int vlAlpha, int vlBeta, int nDepth, BOOL bNoNull = FALSE)
     return vl;
   }
   (void)XqwlEvalOrTt(ply, ttEval, XqwlEvalMode::Raw);
+  const int sEval = XqwlStaticEval(ply);
+  const BOOL improving = XqwlImproving(ply);
+  const BOOL oppWorsening = XqwlOpponentWorsening(ply);
   bInCheck = XQWL_SEARCH_POS.InCheck();
+  if (!bInCheck && nDepth <= RAZOR_MAX_DEPTH && !XqwlInScoreMateZone(vlAlpha) && !XqwlInScoreMateZone(vlBeta)) {
+    const int razor = RAZOR_MARGIN_BASE + RAZOR_MARGIN_DEPTH * nDepth;
+    if (sEval + razor < vlAlpha) {
+      return SearchQuiesc(vlAlpha, vlBeta);
+    }
+  }
+  if (!bInCheck && nDepth <= FUTILITY_MAX_DEPTH && vlBeta < WIN_VALUE && !XqwlInScoreMateZone(vlBeta)) {
+    int rfMargin = REVERSE_FUT_MARGIN_BASE + REVERSE_FUT_MARGIN_DEPTH * nDepth;
+    if (improving) {
+      rfMargin -= rfMargin / 4;
+    }
+    if (sEval - rfMargin >= vlBeta) {
+      return sEval;
+    }
+  }
   if (nDepth >= IID_MIN_DEPTH && mvHash == 0 && !bInCheck) {
     SearchFull(vlAlpha, vlBeta, nDepth - 2, NO_NULL);
     (void)ProbeHash(vlAlpha, vlBeta, nDepth, mvHash, &ttEval);
   }
   if (!bNoNull && !bInCheck && XQWL_SEARCH_POS.NullOkay()) {
-    const int attack = XQWL_SEARCH_POS.AttackingPieceCount(XQWL_SEARCH_POS.sdPlayer);
-    if (attack > 0) {
-      const BOOL verifyNull = (attack < NULL_ATTACKING_MIN);
-      XQWL_SEARCH_POS.NullMove();
-      vl = -SearchFull(-vlBeta, 1 - vlBeta, nDepth - NULL_DEPTH - 1, NO_NULL);
-      XQWL_SEARCH_POS.UndoNullMove();
-      if (vl >= vlBeta) {
-        if (!verifyNull || XQWL_SEARCH_POS.NullSafe() ||
-            -SearchFull(-vlBeta, 1 - vlBeta, nDepth - NULL_DEPTH, NO_NULL) >= vlBeta) {
-          return vl;
+    const int nullStaticMargin =
+        NULL_STATIC_MARGIN_DEPTH * nDepth + (improving ? 0 : NULL_STATIC_MARGIN_IMPROVING);
+    if (sEval >= vlBeta - nullStaticMargin) {
+      const int attack = XQWL_SEARCH_POS.AttackingPieceCount(XQWL_SEARCH_POS.sdPlayer);
+      if (attack > 0) {
+        const BOOL verifyNull = (attack < NULL_ATTACKING_MIN);
+        XQWL_SEARCH_POS.NullMove();
+        vl = -SearchFull(-vlBeta, 1 - vlBeta, nDepth - NULL_DEPTH - 1, NO_NULL);
+        XQWL_SEARCH_POS.UndoNullMove();
+        if (vl >= vlBeta) {
+          if (!verifyNull || XQWL_SEARCH_POS.NullSafe() ||
+              -SearchFull(-vlBeta, 1 - vlBeta, nDepth - NULL_DEPTH, NO_NULL) >= vlBeta) {
+            return vl;
+          }
         }
       }
     }
@@ -608,6 +671,17 @@ static int SearchFull(int vlAlpha, int vlBeta, int nDepth, BOOL bNoNull = FALSE)
   while ((mv = Sort.Next()) != 0) {
     moveCount++;
     const BOOL bCapture = IsCaptureMove(mv);
+    if (!bInCheck && !bCapture && vlBest != -MATE_VALUE) {
+      const int quietDepth = (Sort.singleReply) ? nDepth : nDepth - 1;
+      const int futMargin = XqwlFutilityMargin(nDepth, improving, oppWorsening);
+      if (nDepth <= FUTILITY_MAX_DEPTH && moveCount > 1 && sEval + futMargin <= vlAlpha && quietDepth <= 3) {
+        continue;
+      }
+      const int lmpLimit = (3 + nDepth * nDepth) / (LMP_MOVE_DIV + static_cast<int>(improving));
+      if (nDepth <= LMP_MAX_DEPTH && moveCount >= lmpLimit && vlBest > -WIN_VALUE) {
+        continue;
+      }
+    }
     if (XqwlSearchMakeMove(mv)) {
       nNewDepth = (XQWL_SEARCH_POS.InCheck() || Sort.singleReply) ? nDepth : nDepth - 1;
       if (mv == mvHash && ttSingularExtend) {
