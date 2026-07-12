@@ -9,10 +9,12 @@ import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import torch
-from torch.utils.data import DataLoader, Dataset
+
+if TYPE_CHECKING:
+    from torch.utils.data import DataLoader
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -22,6 +24,7 @@ from features.xqwl_psq import fen_to_feature_indices
 from mycchess_sf.fen_parse import parse_fen_board
 
 DEFAULT_DATA_PATTERN = "worker_*/chunk_*.txt"
+MAX_AUTO_IO_WORKERS = 8
 _WORKER_DIR_RE = re.compile(r"^worker_(\d+)$")
 
 
@@ -62,22 +65,29 @@ def _worker_id(path: Path) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def parse_worker_count(value: object, *, default_auto: bool = True) -> tuple[int, str]:
-    """Parse worker config: ``auto``/``0``/negative -> CPU core count, ``1`` -> serial."""
+def parse_worker_count(
+    value: object,
+    *,
+    default_auto: bool = True,
+    max_auto: int = MAX_AUTO_IO_WORKERS,
+) -> tuple[int, str]:
+    """Parse IO worker config. ``auto`` caps at ``max_auto`` to avoid Windows spawn OOM."""
+    cpu = os.cpu_count() or 1
+
     if isinstance(value, str) and value.lower() == "auto":
-        count = os.cpu_count() or 1
-        return count, f"auto ({count})"
+        count = min(max_auto, cpu)
+        return count, f"auto ({count}, cpu={cpu})"
 
     if value is None:
         if default_auto:
-            count = os.cpu_count() or 1
-            return count, f"auto ({count})"
+            count = min(max_auto, cpu)
+            return count, f"auto ({count}, cpu={cpu})"
         return 1, "1"
 
     count = int(value)
     if count <= 0:
-        resolved = os.cpu_count() or 1
-        return resolved, f"auto ({resolved})"
+        resolved = min(max_auto, cpu)
+        return resolved, f"auto ({resolved}, cpu={cpu})"
     return count, str(count)
 
 
@@ -503,7 +513,7 @@ def compute_zscore_stats(samples: list[Sample]) -> tuple[float, float]:
     return mean, std
 
 
-class NnueDataset(Dataset):
+class NnueDataset:
     def __init__(
         self,
         samples: list[Sample],
@@ -525,7 +535,7 @@ class NnueDataset(Dataset):
         return indices, target_norm, s.vl
 
 
-class PrecomputedNnueDataset(Dataset):
+class PrecomputedNnueDataset:
     """Compact CSR storage for precomputed sparse features (avoids pickling millions of Sample objects)."""
 
     def __init__(
@@ -550,7 +560,9 @@ class PrecomputedNnueDataset(Dataset):
         return self.feat_indices[start:end], float(self.targets_norm[idx]), float(self.targets_raw[idx])
 
 
-def collate_fn(batch: list[tuple[np.ndarray, float, float]]) -> tuple[torch.Tensor, ...]:
+def collate_fn(batch: list[tuple[np.ndarray, float, float]]) -> tuple[Any, ...]:
+    import torch
+
     feat_arrays = [feat_indices for feat_indices, _, _ in batch]
     indices_arr = np.concatenate(feat_arrays) if len(feat_arrays) > 1 else feat_arrays[0]
     offsets = np.empty(len(batch), dtype=np.int64)
@@ -571,7 +583,7 @@ def collate_fn(batch: list[tuple[np.ndarray, float, float]]) -> tuple[torch.Tens
 
 
 def make_dataloader(
-    dataset: Dataset,
+    dataset: Any,
     *,
     batch_size: int,
     shuffle: bool,
@@ -579,6 +591,8 @@ def make_dataloader(
     prefetch_factor: int = 2,
     pin_memory: bool = False,
 ) -> DataLoader:
+    from torch.utils.data import DataLoader
+
     kwargs: dict = {
         "dataset": dataset,
         "batch_size": batch_size,

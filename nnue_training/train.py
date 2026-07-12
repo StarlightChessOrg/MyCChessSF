@@ -6,11 +6,9 @@ import math
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
-import torch
-import torch.nn as nn
 import yaml
-from tqdm import tqdm
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
@@ -29,7 +27,6 @@ from data.dataset import (
     split_samples_by_ratio,
 )
 from features.xqwl_psq import N_FEATURES
-from model.nnue import NNUE
 
 
 def load_config(path: Path) -> dict:
@@ -42,11 +39,10 @@ def resolve_path(base: Path, maybe_rel: str) -> Path:
     return p if p.is_absolute() else (base / p).resolve()
 
 
-@torch.no_grad()
 def evaluate(
-    model: nn.Module,
+    model: Any,
     loader,
-    device: torch.device,
+    device: Any,
     criterion,
     *,
     label_mean: float,
@@ -54,6 +50,9 @@ def evaluate(
     desc: str = "val",
     use_tqdm: bool = True,
 ) -> dict[str, float]:
+    import torch
+    from tqdm import tqdm
+
     model.eval()
     total_loss = 0.0
     total_abs_norm = 0.0
@@ -70,28 +69,29 @@ def evaluate(
     non_blocking = device.type == "cuda"
     batch_iter = tqdm(loader, desc=desc, unit="batch", leave=False) if use_tqdm else loader
 
-    for indices, offsets, targets_norm, targets_raw in batch_iter:
-        indices = indices.to(device, non_blocking=non_blocking)
-        offsets = offsets.to(device, non_blocking=non_blocking)
-        targets_norm = targets_norm.to(device, non_blocking=non_blocking)
-        targets_raw = targets_raw.to(device, non_blocking=non_blocking)
+    with torch.no_grad():
+        for indices, offsets, targets_norm, targets_raw in batch_iter:
+            indices = indices.to(device, non_blocking=non_blocking)
+            offsets = offsets.to(device, non_blocking=non_blocking)
+            targets_norm = targets_norm.to(device, non_blocking=non_blocking)
+            targets_raw = targets_raw.to(device, non_blocking=non_blocking)
 
-        preds_norm = model(indices, offsets)
-        loss = criterion(preds_norm, targets_norm)
-        preds_vl = preds_norm * label_std + label_mean
+            preds_norm = model(indices, offsets)
+            loss = criterion(preds_norm, targets_norm)
+            preds_vl = preds_norm * label_std + label_mean
 
-        bs = targets_norm.size(0)
-        total_loss += loss.item() * bs
-        total_abs_norm += (preds_norm - targets_norm).abs().sum().item()
-        total_sq_norm += ((preds_norm - targets_norm) ** 2).sum().item()
-        total_abs_vl += (preds_vl - targets_raw).abs().sum().item()
+            bs = targets_norm.size(0)
+            total_loss += loss.item() * bs
+            total_abs_norm += (preds_norm - targets_norm).abs().sum().item()
+            total_sq_norm += ((preds_norm - targets_norm) ** 2).sum().item()
+            total_abs_vl += (preds_vl - targets_raw).abs().sum().item()
 
-        sum_pred += preds_vl.sum().item()
-        sum_true += targets_raw.sum().item()
-        sum_pred_sq += (preds_vl * preds_vl).sum().item()
-        sum_true_sq += (targets_raw * targets_raw).sum().item()
-        sum_cross += (preds_vl * targets_raw).sum().item()
-        n += bs
+            sum_pred += preds_vl.sum().item()
+            sum_true += targets_raw.sum().item()
+            sum_pred_sq += (preds_vl * preds_vl).sum().item()
+            sum_true_sq += (targets_raw * targets_raw).sum().item()
+            sum_cross += (preds_vl * targets_raw).sum().item()
+            n += bs
 
     if n == 0:
         return {
@@ -122,14 +122,16 @@ def evaluate(
 def save_checkpoint(
     path: Path,
     *,
-    model: nn.Module,
-    optimizer: torch.optim.Optimizer,
+    model: Any,
+    optimizer: Any,
     epoch: int,
     val_loss: float,
     label_mean: float,
     label_std: float,
     config: dict,
 ) -> None:
+    import torch
+
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
@@ -147,9 +149,9 @@ def save_checkpoint(
 
 
 def train_epoch(
-    model: nn.Module,
+    model: Any,
     loader,
-    device: torch.device,
+    device: Any,
     optimizer,
     criterion,
     *,
@@ -157,6 +159,8 @@ def train_epoch(
     max_epochs: int,
     use_tqdm: bool = True,
 ) -> float:
+    from tqdm import tqdm
+
     model.train()
     total_loss = 0.0
     n = 0
@@ -198,6 +202,11 @@ def train_epoch(
 
 
 def main() -> None:
+    import torch
+    import torch.nn as nn
+
+    from model.nnue import NNUE
+
     parser = argparse.ArgumentParser(description="Train MyCChessSF NNUE")
     parser.add_argument("--config", type=Path, default=ROOT / "configs" / "smoke.yaml")
     args = parser.parse_args()
@@ -405,4 +414,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import multiprocessing
+
+    multiprocessing.freeze_support()
+    if multiprocessing.current_process().name == "MainProcess":
+        main()
