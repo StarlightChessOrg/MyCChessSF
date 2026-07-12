@@ -4,6 +4,8 @@
 
 **目标平台：Linux**（编译 `xqwlight_core.so` 与 `xqwl_gen_nnue`）。
 
+不想从源码编译？可直接下载 [GitHub Releases](https://github.com/StarlightChessOrg/MyCChessSF/releases/latest) 中的 Linux 部署包（`MyCChessSF-v*-linux-x86_64-py3.13.tar.gz`）。
+
 ## 快速开始
 
 ```bash
@@ -52,6 +54,17 @@ mycchess-play-web --port 5151
 
 - **对弈**：红人黑机，可选开局库与音效 → [网页对弈](docs/web-play.md)
 - **NNUE**：自生成搜索分数据 → 训练 → INT8 → 搜索内评估 → [NNUE 总览](docs/nnue-overview.md)
+
+## 仓库概览
+
+核心目录：`cpp/`（引擎）、`mycchess_sf/`（网页对弈）、`nnue_training/` / `nnue_qINT8/`（NNUE 管线）、`data/`（开局库压缩包与部署用 NNUE 权重）。完整说明见 [项目结构](docs/project-structure.md)。
+
+| 目录 | 说明 |
+|------|------|
+| `third_party/` | 外部参考源码（如 [Pikafish](third_party/Pikafish/)），仅供 NNUE/搜索调研阅读，**不参与本引擎编译** |
+| `tmps/` | 本地临时目录，可放量化/推理冒烟测试用的 checkpoint（`*.pt` 已 gitignore，不入库） |
+| `deployment/` | `build_linux.sh` 生成的可部署目录（gitignore，Release 包即其 tar 打包） |
+| `dist/` | `make_release.sh` 产出的发布压缩包（gitignore） |
 
 ## 许可证
 

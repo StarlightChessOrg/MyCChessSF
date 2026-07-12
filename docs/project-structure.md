@@ -30,8 +30,11 @@ MyCChessSF/
 ├── nnue_data/                    xqwl_gen_nnue 输出（FEN\tvl，通常不入库）
 ├── nnue_training/                浮点 NNUE PyTorch 训练
 ├── nnue_qINT8/                   INT8 量化 + .xqnnue.bin 导出
+├── third_party/                  外部参考（如 Pikafish），调研用，不参与编译
+├── tmps/                         本地临时 checkpoint，*.pt 不入库
 ├── scripts/
 │   ├── build_linux.sh            一键编译 + 打包 deployment/
+│   ├── make_release.sh           打包 dist/ 发布压缩包
 │   ├── extract_book.py           从 book.7z 解压 BOOK.DAT 到 deployment/db/
 │   ├── test_nnue_wsl.py          C++ vs Python NNUE 对比测试
 │   └── fetch_xqwl_assets.py      拉取网页 UI 资源
