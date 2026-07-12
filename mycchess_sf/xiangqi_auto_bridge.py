@@ -12,14 +12,29 @@ from mycchess_sf.bridge_codec import bridge4_to_iccs, iccs_to_computer_token
 from mycchess_sf.xqwl_state import XqwlGameState
 
 
+def _deploy_root() -> Path | None:
+    lib = Path(__file__).resolve().parent.parent
+    if (lib.parent / "db").is_dir() and (lib / "mycchess_sf").is_dir():
+        return lib.parent
+    return None
+
+
 def _default_nnue_path() -> Path | None:
     root = Path(__file__).resolve().parent.parent
-    for rel in (
-        "deployment/model/quantized.xqnnue.bin",
-        "data/nnue_model/quantized.xqnnue.bin",
-        "nnue_qINT8/output/quantized.xqnnue.bin",
-    ):
-        p = root / rel
+    deploy = _deploy_root()
+    candidates: list[Path] = []
+    if deploy is not None:
+        candidates.append(deploy / "model" / "quantized.xqnnue.bin")
+    candidates.extend(
+        [
+            root / "deployment" / "model" / "quantized.xqnnue.bin",
+            Path.cwd() / "deployment" / "model" / "quantized.xqnnue.bin",
+            root / "data" / "nnue_model" / "quantized.xqnnue.bin",
+            Path.cwd() / "data" / "nnue_model" / "quantized.xqnnue.bin",
+            root / "nnue_qINT8" / "output" / "quantized.xqnnue.bin",
+        ]
+    )
+    for p in candidates:
         if p.is_file():
             return p
     return None
@@ -27,8 +42,19 @@ def _default_nnue_path() -> Path | None:
 
 def _default_book_path() -> Path | None:
     root = Path(__file__).resolve().parent.parent
-    for rel in ("deployment/db/BOOK.DAT", "data/BOOK.DAT"):
-        p = root / rel
+    deploy = _deploy_root()
+    candidates: list[Path] = []
+    if deploy is not None:
+        candidates.append(deploy / "db" / "BOOK.DAT")
+    candidates.extend(
+        [
+            root / "deployment" / "db" / "BOOK.DAT",
+            Path.cwd() / "deployment" / "db" / "BOOK.DAT",
+            root / "data" / "BOOK.DAT",
+            Path.cwd() / "data" / "BOOK.DAT",
+        ]
+    )
+    for p in candidates:
         if p.is_file():
             return p
     return None

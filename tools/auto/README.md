@@ -31,7 +31,13 @@ play.xiangqi.com  （相弈指定等级 bot）
 
 ### 1. 启动引擎桥（终端 A）
 
-在仓库根目录，且已 `pip install -e .`：
+**部署包**（推荐）：
+
+```bash
+./deployment/bin/mycchess-xiangqi-bridge --think-ms 1000
+```
+
+**开发树**（`pip install -e .` 后）：
 
 ```bash
 mycchess-xiangqi-bridge --think-ms 1000
@@ -43,7 +49,7 @@ mycchess-xiangqi-bridge --think-ms 1000
 ### 2. 安装并启动 Selenium 桥（终端 B）
 
 ```powershell
-cd tools\auto
+cd deployment\tools\auto   # 或仓库 tools\auto
 npm install
 $env:OPPONENT_LEVEL = "9"   # 相弈人机等级 1–9
 $env:USER_PROFILE_DIR = "$env:LOCALAPPDATA\Microsoft\Edge\User Data"
