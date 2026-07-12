@@ -83,19 +83,36 @@ python train.py --config configs/full_gpu.yaml
 1. **多进程加载** — 读取 `merged.txt` 或分块文件，校验 FEN
 2. **FEN 去重**（默认 `dedupe_fen: true`）— 按「棋盘 + 行棋方」合并重复局面，同一 FEN 多条 `vl` 取**平均值**
 3. **划分 train/val** — 按 `val_ratio` 或 `val_workers`
-4. **将杀分重映射**（默认 `mate_remap: true`）— 扫描全数据集 quiet 样本的 min/max，\|vl\| ≥ 9800 的样本改为 **±max(\|min\|, \|max\|)**，保留在训练集中
-5. **z-score 统计** — 对重映射后的**全部**样本计算 mean/std
-6. **特征预计算**（可选）— 多进程生成 PSQ 稀疏索引
-7. **CSR 打包** — 将特征压成紧凑数组
-8. **训练循环** — 全部样本参与 loss；早停与 best checkpoint 看全量 `val_loss`
+4. **静态局面过滤**（默认 `quiet_only: true`）— 仅保留：非将杀区、行棋方未被将军、\|搜索分 − PST\| ≤ `quiet_pst_margin`（需 `xqwlight_core`）
+5. **将杀分重映射**（`quiet_only: false` 时可选 `mate_remap: true`）— 扫描 quiet 极值，\|vl\| ≥ 9800 改为 ±cap
+6. **z-score 统计** — 对训练集计算 mean/std
+7. **特征预计算**（可选）— 多进程生成 PSQ 稀疏索引
+8. **CSR 打包** — 将特征压成紧凑数组
+9. **训练循环** — 全部样本参与 loss；早停与 best checkpoint 看全量 `val_loss`
 
-### 将杀分处理
+### 静态局面过滤（quiet_only）
+
+与 NNUE 文献一致：NNUE 拟合的是**静态评估**，训练样本应排除将军、将杀带，以及搜索分与 PST 差距过大的「非静态」局面。
+
+| 配置 | 默认 | 说明 |
+|------|------|------|
+| `data.quiet_only` | `true` | 仅保留静态局面；关闭则保留全部样本 |
+| `data.quiet_pst_margin` | `70` | 保留条件：\|vl − PST\| ≤ 此值（cp） |
+| `data.mate_threshold` | `9800` | \|vl\| ≥ 此值视为将杀带并**丢弃**（非 remap） |
+
+依赖：过滤步骤调用 `xqwlight_core.Position`（`set_fen`、`in_check`、`evaluate`）。在 Linux/WSL 下先执行 `scripts/build_linux.sh`，确保扩展位于仓库根目录可 import。
+
+`quiet_only: true` 时 **`mate_remap` 应设为 `false`**（配置已默认）；将杀样本已被丢弃，无需再 remap。
+
+### 将杀分处理（quiet_only: false 时）
 
 | 配置 | 默认 | 说明 |
 |------|------|------|
 | `data.dedupe_fen` | `true` | 训练前按 FEN 去重；重复 `vl` 取平均值 |
-| `data.mate_threshold` | `9800` | \|vl\| ≥ 此值视为将杀带（与 C++ `WIN_VALUE` 一致） |
-| `data.mate_remap` | `true` | 将杀分钳到 quiet 极值的最大绝对值，不丢弃样本 |
+| `data.quiet_only` | `true` | 仅静态局面；见上节 |
+| `data.quiet_pst_margin` | `70` | PST 与搜索分允许偏差（cp） |
+| `data.mate_threshold` | `9800` | \|vl\| ≥ 此值视为将杀带 |
+| `data.mate_remap` | `false` | `quiet_only: true` 时关闭；`false` 时可将将杀分钳到 quiet 极值 |
 | `data.mate_exclude_from_zscore` | `false` | 设为 `true` 可回退：z-score 不含将杀（需 `mate_remap: false`） |
 | `train.mate_exclude_from_loss` | `false` | 设为 `true` 可回退：loss 不含将杀（需 `mate_remap: false`） |
 

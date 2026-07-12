@@ -30,6 +30,7 @@ from data.dataset import (
 )
 from features.xqwl_psq import N_FEATURES
 from labels import DEFAULT_MATE_THRESHOLD
+from quiet import filter_static_samples, format_static_filter_stats
 
 
 def log_train(message: str = "") -> None:
@@ -434,7 +435,39 @@ def main() -> None:
     print(f"[data] train={len(train_samples):,}  val={len(val_samples):,}  skipped={skipped:,}", flush=True)
 
     mate_threshold = float(data_cfg.get("mate_threshold", DEFAULT_MATE_THRESHOLD))
-    mate_remap = bool(data_cfg.get("mate_remap", True))
+    quiet_only = bool(data_cfg.get("quiet_only", True))
+    quiet_pst_margin = float(data_cfg.get("quiet_pst_margin", 70.0))
+    mate_remap = bool(data_cfg.get("mate_remap", not quiet_only))
+    if quiet_only and bool(data_cfg.get("mate_remap", False)):
+        print(
+            "[data] quiet_only=true: ignoring mate_remap (mate-zone samples are dropped, not remapped)",
+            flush=True,
+        )
+        mate_remap = False
+
+    if quiet_only:
+        train_samples, train_static = filter_static_samples(
+            train_samples,
+            mate_threshold=mate_threshold,
+            pst_margin=quiet_pst_margin,
+            load_workers=load_workers,
+        )
+        val_samples, val_static = filter_static_samples(
+            val_samples,
+            mate_threshold=mate_threshold,
+            pst_margin=quiet_pst_margin,
+            load_workers=load_workers,
+        )
+        print(f"[data] static filter train: {format_static_filter_stats(train_static)}", flush=True)
+        print(f"[data] static filter val:   {format_static_filter_stats(val_static)}", flush=True)
+        if not train_samples:
+            raise ValueError("quiet_only removed all training samples; relax quiet_pst_margin or check data")
+        print(
+            f"[data] train={len(train_samples):,}  val={len(val_samples):,}  (after static filter)",
+            flush=True,
+        )
+    else:
+        print("[data] quiet_only=false: keeping all samples (in-check / mate / unstable PST)", flush=True)
     exclude_mate_from_zscore = bool(data_cfg.get("mate_exclude_from_zscore", False))
     exclude_mate_from_loss = bool(train_cfg.get("mate_exclude_from_loss", False))
 
@@ -471,7 +504,7 @@ def main() -> None:
         flush=True,
     )
     print(
-        f"[label] mate handling: remap={mate_remap}  "
+        f"[label] mate handling: quiet_only={quiet_only}  remap={mate_remap}  "
         f"zscore_exclude={exclude_mate_from_zscore}  loss_exclude={exclude_mate_from_loss}",
         flush=True,
     )
