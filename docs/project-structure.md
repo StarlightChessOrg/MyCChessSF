@@ -41,6 +41,10 @@ MyCChessSF/
 │   ├── extract_book.py           从 book.7z 解压 BOOK.DAT 到 deployment/db/
 │   ├── test_nnue_wsl.py          C++ vs Python NNUE 对比测试
 │   └── fetch_xqwl_assets.py      拉取网页 UI 资源
+├── tools/
+│   └── auto/                     相弈象棋 Selenium 自动对弈（见 tools/auto/README.md）
+│       ├── z.js                  网页 ↔ :9494 桥接脚本
+│       └── package.json          Node 依赖（selenium-webdriver）
 ├── .github/workflows/            CI（推送 v* 标签时自动构建 Release）
 ├── deployment/                   build_linux.sh 产出（gitignore，可部署目录）
 ├── dist/                         make_release.sh 产出（gitignore，Release 压缩包）
@@ -56,6 +60,8 @@ MyCChessSF/
 | `nnue_training/` | XQWL-PSQ 特征、EmbeddingBag + FC 头、拟合搜索分 |
 | `nnue_qINT8/` | 对称 INT8 量化、校准 input scale、导出二进制权重 |
 | `mycchess_sf/play_web.py` | 浏览器对弈前端 + Sanic 后端 |
+| `mycchess_sf/xiangqi_auto_bridge.py` | 相弈自动测试 HTTP 桥（Chess98 兼容 :9494） |
+| `tools/auto/` | Selenium 驱动相弈象棋指定等级 bot 对战 |
 | `data/nnue_model/` | 部署用 INT8 权重源（`quantized.xqnnue.bin` 等） |
 | `data/compressed_files/` | 开局库等 7z 压缩包，`build_linux.sh` 解压 `book.7z` |
 
