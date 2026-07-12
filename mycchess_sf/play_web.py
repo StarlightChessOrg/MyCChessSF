@@ -503,7 +503,7 @@ def _html_page() -> str:
       background:var(--bg);min-height:100vh}}
     .win{{max-width:1280px;margin:0 auto;padding:12px 16px 20px}}
     .titlebar{{font-size:15px;font-weight:600;margin-bottom:10px}}
-    .layout{{display:grid;grid-template-columns:minmax(320px,380px) minmax(0,1fr) 260px;gap:16px;align-items:start}}
+    .layout{{display:grid;grid-template-columns:minmax(360px,420px) minmax(0,1fr) 260px;gap:16px;align-items:start}}
     @media(max-width:1180px){{.layout{{grid-template-columns:1fr}} .think-panel{{order:3}}}}
     .board-wrap{{display:flex;justify-content:center}}
     .board-shell{{background:#8b7355;padding:6px;border:1px solid #5c4a32;box-shadow:0 2px 8px rgba(0,0,0,.25)}}
@@ -529,25 +529,22 @@ def _html_page() -> str:
     .path-val{{display:block;font-family:Consolas,"Microsoft YaHei",monospace;line-height:1.45;
       word-break:break-all;color:#3d2f1f}}
     .path-val.missing{{color:#9a9080;font-style:italic}}
-    .think-panel{{background:var(--panel);border:1px solid #b9a88d;padding:14px 16px;align-self:stretch}}
+    .think-panel{{background:var(--panel);border:1px solid #b9a88d;padding:14px 16px;align-self:stretch;min-width:0}}
     .think-panel h2{{font-size:15px;margin:0 0 8px}}
-    .think-panel .hint{{font-size:12px;color:#5c4a32;margin-bottom:10px}}
-    #think-log-body{{max-height:min(560px,calc(100vh - 120px));overflow:auto;background:rgba(255,255,255,.45);
-      padding:6px;border:1px solid #c9b89a;min-width:0}}
-    #think-log-table{{border-collapse:collapse;width:100%;font-family:Consolas,"Microsoft YaHei",monospace;
-      font-size:11px;line-height:1.45;table-layout:fixed}}
-    #think-log-table th,#think-log-table td{{padding:3px 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-      border-bottom:1px solid rgba(201,184,154,.55);vertical-align:middle}}
-    #think-log-table thead th{{position:sticky;top:0;z-index:1;background:#e8dcc8;color:#3d2f1f;font-weight:600;
-      border-bottom:1px solid #b9a88d;font-size:11px}}
-    #think-log-table tbody tr:last-child td{{border-bottom:none}}
-    #think-log-table tbody tr:hover td{{background:rgba(255,255,255,.35)}}
-    #think-log-table .col-depth{{width:2.6em;text-align:center}}
-    #think-log-table .col-ms{{width:3.6em;text-align:right;font-variant-numeric:tabular-nums}}
-    #think-log-table .col-vl{{width:4ch;min-width:4ch;text-align:right;font-variant-numeric:tabular-nums;
-      letter-spacing:0;font-feature-settings:"tnum" 1}}
-    #think-log-table .col-piece{{width:2em;text-align:center;font-family:"Microsoft YaHei","SimSun",serif}}
-    #think-log-table .col-move{{text-align:left;overflow:visible}}
+    .think-panel .hint{{font-size:12px;color:#5c4a32;margin-bottom:10px;line-height:1.45}}
+    #think-log-body{{max-height:min(560px,calc(100vh - 120px));min-height:140px;overflow:auto;
+      background:rgba(255,255,255,.45);padding:0;border:1px solid #c9b89a}}
+    #think-log-table{{border-collapse:collapse;width:100%;min-width:320px;table-layout:auto;font-size:12px;line-height:1.4}}
+    #think-log-table th,#think-log-table td{{padding:5px 8px;white-space:nowrap;border:1px solid #c9b89a;vertical-align:middle}}
+    #think-log-table thead th{{position:sticky;top:0;z-index:1;background:#e8dcc8;color:#3d2f1f;font-weight:600;text-align:center}}
+    #think-log-table tbody td{{background:rgba(255,255,255,.55);font-family:Consolas,"Microsoft YaHei",monospace}}
+    #think-log-table tbody tr:hover td{{background:rgba(255,255,255,.85)}}
+    #think-log-table .col-depth{{width:2.8em;text-align:center}}
+    #think-log-table .col-ms{{width:3.4em;text-align:right;font-variant-numeric:tabular-nums}}
+    #think-log-table .col-vl{{width:4.5ch;min-width:4.5ch;text-align:right;font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}}
+    #think-log-table .col-piece{{width:2.4em;text-align:center;font-family:"Microsoft YaHei","SimSun",serif}}
+    #think-log-table .col-move{{text-align:left;min-width:9em}}
+    #think-log-table .empty-row td{{text-align:center;color:#9a9080;font-style:italic;font-family:"Microsoft YaHei",serif;padding:16px 8px}}
     #status{{margin-top:12px;font-size:13px;min-height:3.5em;white-space:pre-wrap}}
     #ai-thinking{{font-size:12px;color:#7a4b00;min-height:1.6em;margin-top:8px}}
     .input-locked #board{{opacity:.94;pointer-events:none}}
@@ -577,6 +574,13 @@ def _html_page() -> str:
         <div class="hint">{BRAND_ZH} 每步决策：深度、耗时、分数（vl）、棋子与坐标</div>
         <div id="think-log-body">
           <table id="think-log-table">
+            <colgroup>
+              <col class="col-depth"/>
+              <col class="col-ms"/>
+              <col class="col-vl"/>
+              <col class="col-piece"/>
+              <col class="col-move"/>
+            </colgroup>
             <thead>
               <tr>
                 <th class="col-depth">深度</th>
@@ -736,6 +740,15 @@ def _html_page() -> str:
     if(key===lastThinkLogKey)return;
     lastThinkLogKey=key;
     thinkLogTbody.replaceChildren();
+    if(!entries.length){{
+      var trEmpty=document.createElement("tr");
+      trEmpty.className="empty-row";
+      var tdEmpty=document.createElement("td");
+      tdEmpty.colSpan=5;
+      tdEmpty.textContent="暂无记录";
+      trEmpty.appendChild(tdEmpty);
+      thinkLogTbody.appendChild(trEmpty);
+    }}
     entries.forEach(function(e){{
       var tr=document.createElement("tr");
       if(e.depth!==undefined&&e.depth!==null){{
