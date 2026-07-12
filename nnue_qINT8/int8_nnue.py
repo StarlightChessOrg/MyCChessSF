@@ -43,6 +43,15 @@ def _quantize_input(x: Tensor, input_scale: float) -> Tensor:
 
 
 @dataclass
+class FloatLayerLinear:
+    weight: Tensor
+    bias: Tensor
+
+    def forward(self, x: Tensor) -> Tensor:
+        return F.linear(x, self.weight, self.bias)
+
+
+@dataclass
 class QuantizedLayerLinear:
     weight_int8: Tensor
     bias_int32: Tensor
@@ -101,9 +110,9 @@ class QuantizedFeatureTransformer:
 @dataclass
 class QuantizedNNUE:
     ft: QuantizedFeatureTransformer
-    fc0: QuantizedLayerLinear
-    fc1: QuantizedLayerLinear
-    fc2: QuantizedLayerLinear
+    fc0: QuantizedLayerLinear | FloatLayerLinear
+    fc1: QuantizedLayerLinear | FloatLayerLinear
+    fc2: QuantizedLayerLinear | FloatLayerLinear
     label_mean: float
     label_std: float
     n_features: int
@@ -113,42 +122,53 @@ class QuantizedNNUE:
     ft_clip: float
     act_clip: float
     source_checkpoint: str
+    fc_float: bool = False
+
+    def _fc_forward(self, layer: QuantizedLayerLinear | FloatLayerLinear, x: Tensor) -> Tensor:
+        if isinstance(layer, FloatLayerLinear):
+            return layer.forward(x)
+        return layer.forward(x)
+
+    def _fc_forward_int8(self, layer: QuantizedLayerLinear | FloatLayerLinear, x: Tensor) -> Tensor:
+        if isinstance(layer, FloatLayerLinear):
+            return layer.forward(x)
+        return layer.forward_int8(x)
 
     def forward_norm(self, indices: Tensor, offsets: Tensor) -> Tensor:
         acc = self.ft.forward(indices, offsets)
         h = _feature_transform(acc, ft_clip=self.ft_clip)
 
-        x0 = self.fc0.forward(h)
+        x0 = self._fc_forward(self.fc0, h)
         x0_cat = torch.cat(
             (_sq_clipped_relu(x0, self.act_clip), _clipped_relu(x0, self.act_clip)),
             dim=1,
         )
 
-        x1 = self.fc1.forward(x0_cat)
+        x1 = self._fc_forward(self.fc1, x0_cat)
         x1_cat = torch.cat(
             (_sq_clipped_relu(x1, self.act_clip), _clipped_relu(x1, self.act_clip)),
             dim=1,
         )
 
-        return self.fc2.forward(x1_cat).squeeze(-1)
+        return self._fc_forward(self.fc2, x1_cat).squeeze(-1)
 
     def forward_norm_int8(self, indices: Tensor, offsets: Tensor) -> Tensor:
         acc = self.ft.forward(indices, offsets)
         h = _feature_transform(acc, ft_clip=self.ft_clip)
 
-        x0 = self.fc0.forward_int8(h)
+        x0 = self._fc_forward_int8(self.fc0, h)
         x0_cat = torch.cat(
             (_sq_clipped_relu(x0, self.act_clip), _clipped_relu(x0, self.act_clip)),
             dim=1,
         )
 
-        x1 = self.fc1.forward_int8(x0_cat)
+        x1 = self._fc_forward_int8(self.fc1, x0_cat)
         x1_cat = torch.cat(
             (_sq_clipped_relu(x1, self.act_clip), _clipped_relu(x1, self.act_clip)),
             dim=1,
         )
 
-        return self.fc2.forward_int8(x1_cat).squeeze(-1)
+        return self._fc_forward_int8(self.fc2, x1_cat).squeeze(-1)
 
     def forward_vl(self, indices: Tensor, offsets: Tensor) -> Tensor:
         return self.forward_norm(indices, offsets) * self.label_std + self.label_mean
@@ -157,8 +177,9 @@ class QuantizedNNUE:
         return self.forward_norm_int8(indices, offsets) * self.label_std + self.label_mean
 
     def state_dict(self) -> dict:
-        return {
-            "format": "mycchesssf_xqint8_v2",
+        payload: dict = {
+            "format": "mycchesssf_xqint8_v3" if self.fc_float else "mycchesssf_xqint8_v2",
+            "fc_float": self.fc_float,
             "label_mean": self.label_mean,
             "label_std": self.label_std,
             "n_features": self.n_features,
@@ -171,30 +192,38 @@ class QuantizedNNUE:
             "ft_weight_int8": self.ft.weight_int8,
             "ft_bias_int32": self.ft.bias_int32,
             "ft_scales": self.ft.scales,
-            "fc0_weight_int8": self.fc0.weight_int8,
-            "fc0_bias_int32": self.fc0.bias_int32,
-            "fc0_scales": self.fc0.scales,
-            "fc0_input_scale": self.fc0.input_scale,
-            "fc1_weight_int8": self.fc1.weight_int8,
-            "fc1_bias_int32": self.fc1.bias_int32,
-            "fc1_scales": self.fc1.scales,
-            "fc1_input_scale": self.fc1.input_scale,
-            "fc2_weight_int8": self.fc2.weight_int8,
-            "fc2_bias_int32": self.fc2.bias_int32,
-            "fc2_scales": self.fc2.scales,
-            "fc2_input_scale": self.fc2.input_scale,
         }
+        if self.fc_float:
+            for name, layer in (("fc0", self.fc0), ("fc1", self.fc1), ("fc2", self.fc2)):
+                assert isinstance(layer, FloatLayerLinear)
+                payload[f"{name}_weight_f32"] = layer.weight
+                payload[f"{name}_bias_f32"] = layer.bias
+        else:
+            for name, layer in (("fc0", self.fc0), ("fc1", self.fc1), ("fc2", self.fc2)):
+                assert isinstance(layer, QuantizedLayerLinear)
+                payload[f"{name}_weight_int8"] = layer.weight_int8
+                payload[f"{name}_bias_int32"] = layer.bias_int32
+                payload[f"{name}_scales"] = layer.scales
+                payload[f"{name}_input_scale"] = layer.input_scale
+        return payload
 
     @classmethod
     def from_state_dict(cls, data: dict) -> QuantizedNNUE:
         fmt = data.get("format")
-        if fmt not in ("mycchesssf_xqint8_v1", "mycchesssf_xqint8_v2"):
+        if fmt not in ("mycchesssf_xqint8_v1", "mycchesssf_xqint8_v2", "mycchesssf_xqint8_v3"):
             raise ValueError(f"Unsupported quantized format: {fmt!r}")
 
+        fc_float = bool(data.get("fc_float", fmt == "mycchesssf_xqint8_v3"))
         act_clip = float(data["act_clip"])
         ft_clip = float(data["ft_clip"])
 
-        def _layer(prefix: str) -> QuantizedLayerLinear:
+        def _float_layer(prefix: str) -> FloatLayerLinear:
+            return FloatLayerLinear(
+                weight=data[f"{prefix}_weight_f32"].float(),
+                bias=data[f"{prefix}_bias_f32"].float(),
+            )
+
+        def _int8_layer(prefix: str) -> QuantizedLayerLinear:
             input_scale = float(data.get(f"{prefix}_input_scale", 0.0))
             if input_scale <= 0.0:
                 if prefix == "fc0":
@@ -213,11 +242,16 @@ class QuantizedNNUE:
             bias_int32=data["ft_bias_int32"],
             scales=data["ft_scales"],
         )
+        if fc_float:
+            fc0, fc1, fc2 = _float_layer("fc0"), _float_layer("fc1"), _float_layer("fc2")
+        else:
+            fc0, fc1, fc2 = _int8_layer("fc0"), _int8_layer("fc1"), _int8_layer("fc2")
+
         return cls(
             ft=ft,
-            fc0=_layer("fc0"),
-            fc1=_layer("fc1"),
-            fc2=_layer("fc2"),
+            fc0=fc0,
+            fc1=fc1,
+            fc2=fc2,
             label_mean=float(data["label_mean"]),
             label_std=float(data["label_std"]),
             n_features=int(data["n_features"]),
@@ -227,6 +261,7 @@ class QuantizedNNUE:
             ft_clip=ft_clip,
             act_clip=act_clip,
             source_checkpoint=str(data.get("source_checkpoint", "")),
+            fc_float=fc_float,
         )
 
     def save(self, path: str) -> None:
@@ -245,6 +280,9 @@ def calibrate_fc_input_scales(
     device: torch.device,
 ) -> tuple[float, float, float]:
     """Scan calibration data for per-layer FC input maxima; set input_scale = max/127."""
+    if model.fc_float:
+        return 0.0, 0.0, 0.0
+
     max_fc0 = 0.0
     max_fc1 = 0.0
     max_fc2 = 0.0
@@ -282,23 +320,39 @@ def calibrate_fc_input_scales(
     return fc0_scale, fc1_scale, fc2_scale
 
 
-def quantize_float_nnue(model: nn.Module, *, source_checkpoint: str) -> QuantizedNNUE:
+def quantize_float_nnue(
+    model: nn.Module,
+    *,
+    source_checkpoint: str,
+    fc_float: bool = True,
+) -> QuantizedNNUE:
     ft_w = model.ft_embed.weight.detach().cpu()
     ft_b = model.ft_bias.detach().cpu()
 
     ft_q, ft_scales = symmetric_quantize_per_column(ft_w)
     ft_b_q = quantize_bias_per_column(ft_b, ft_scales)
 
-    def _q_linear(layer: nn.Linear) -> QuantizedLayerLinear:
-        w_q, scales = symmetric_quantize_per_channel(layer.weight.detach().cpu(), channel_dim=0)
-        b_q = quantize_bias_per_channel(layer.bias.detach().cpu(), scales, channel_dim=0)
-        return QuantizedLayerLinear(weight_int8=w_q, bias_int32=b_q, scales=scales, input_scale=0.0)
+    if fc_float:
+        def _float_linear(layer: nn.Linear) -> FloatLayerLinear:
+            return FloatLayerLinear(
+                weight=layer.weight.detach().cpu().float(),
+                bias=layer.bias.detach().cpu().float(),
+            )
+
+        fc0, fc1, fc2 = _float_linear(model.fc0), _float_linear(model.fc1), _float_linear(model.fc2)
+    else:
+        def _q_linear(layer: nn.Linear) -> QuantizedLayerLinear:
+            w_q, scales = symmetric_quantize_per_channel(layer.weight.detach().cpu(), channel_dim=0)
+            b_q = quantize_bias_per_channel(layer.bias.detach().cpu(), scales, channel_dim=0)
+            return QuantizedLayerLinear(weight_int8=w_q, bias_int32=b_q, scales=scales, input_scale=0.0)
+
+        fc0, fc1, fc2 = _q_linear(model.fc0), _q_linear(model.fc1), _q_linear(model.fc2)
 
     return QuantizedNNUE(
         ft=QuantizedFeatureTransformer(weight_int8=ft_q, bias_int32=ft_b_q, scales=ft_scales),
-        fc0=_q_linear(model.fc0),
-        fc1=_q_linear(model.fc1),
-        fc2=_q_linear(model.fc2),
+        fc0=fc0,
+        fc1=fc1,
+        fc2=fc2,
         label_mean=0.0,
         label_std=1.0,
         n_features=int(model.n_features),
@@ -308,4 +362,5 @@ def quantize_float_nnue(model: nn.Module, *, source_checkpoint: str) -> Quantize
         ft_clip=float(model.ft_clip),
         act_clip=float(model.act_clip),
         source_checkpoint=source_checkpoint,
+        fc_float=fc_float,
     )

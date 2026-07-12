@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import random
 import sys
 from pathlib import Path
 
@@ -18,7 +19,7 @@ for p in (ROOT, TRAINING_ROOT, REPO_ROOT):
 
 from data.dataset import DEFAULT_DATA_PATTERN, NnueDataset, load_samples, make_dataloader
 from evaluate import evaluate_models
-from int8_nnue import QuantizedNNUE, calibrate_fc_input_scales, quantize_float_nnue
+from int8_nnue import FloatLayerLinear, QuantizedLayerLinear, QuantizedNNUE, calibrate_fc_input_scales, quantize_float_nnue
 from model.nnue import NNUE
 
 
@@ -56,6 +57,7 @@ def build_calibration_loader(
     label_mean: float,
     label_std: float,
     max_samples: int,
+    sample_seed: int,
     batch_size: int,
     num_workers: int,
     prefetch_factor: int,
@@ -63,7 +65,11 @@ def build_calibration_loader(
 ) -> tuple[torch.utils.data.DataLoader, int]:
     samples, skipped = load_samples(data_source, pattern)
     if max_samples > 0 and len(samples) > max_samples:
-        samples = samples[:max_samples]
+        rng = random.Random(sample_seed)
+        indices = list(range(len(samples)))
+        rng.shuffle(indices)
+        pick = sorted(indices[:max_samples])
+        samples = [samples[i] for i in pick]
 
     dataset = NnueDataset(samples, label_mean=label_mean, label_std=label_std)
     loader = make_dataloader(
@@ -75,6 +81,38 @@ def build_calibration_loader(
         pin_memory=device.type == "cuda",
     )
     return loader, skipped
+
+
+@torch.no_grad()
+def parity_report(
+    float_model: NNUE,
+    quant_model: QuantizedNNUE,
+    loader,
+    device: torch.device,
+    *,
+    label_mean: float,
+    label_std: float,
+) -> dict[str, float]:
+    float_model.eval()
+    abs_err: list[float] = []
+    for batch in loader:
+        indices, offsets, _targets_norm, _targets_raw, _is_mate = batch
+        indices = indices.to(device)
+        offsets = offsets.to(device)
+        pred_float = float_model(indices, offsets) * label_std + label_mean
+        pred_quant = quant_model.forward_vl_int8(indices, offsets)
+        abs_err.extend((pred_float - pred_quant).abs().tolist())
+
+    if not abs_err:
+        return {"n": 0.0, "mae_vl": float("inf"), "max_vl": float("inf")}
+
+    tensor = torch.tensor(abs_err, dtype=torch.float64)
+    return {
+        "n": float(tensor.numel()),
+        "mae_vl": float(tensor.mean().item()),
+        "max_vl": float(tensor.max().item()),
+        "p99_vl": float(torch.quantile(tensor, 0.99).item()),
+    }
 
 
 def print_metrics(name: str, metrics: dict[str, float]) -> None:
@@ -139,6 +177,9 @@ def main() -> None:
         if args.max_samples is not None
         else int(data_cfg.get("max_samples", 10000))
     )
+    sample_seed = int(data_cfg.get("sample_seed", 42))
+    fc_float = bool(quant_cfg.get("fc_float", True))
+    max_parity_mae = float(quant_cfg.get("max_parity_mae_vl", 5.0))
     output_path = resolve_path(
         ROOT,
         str(args.output or cfg.get("output", "output/quantized.xqint8.pt")),
@@ -150,7 +191,11 @@ def main() -> None:
     device = torch.device(quant_cfg.get("device", "cpu"))
 
     print(f"[checkpoint] {checkpoint_path}")
-    print(f"[data] source={data_source}  pattern={data_pattern!r}  max_samples={max_samples}")
+    print(
+        f"[data] source={data_source}  pattern={data_pattern!r}  "
+        f"max_samples={max_samples}  sample_seed={sample_seed}"
+    )
+    print(f"[quantize] fc_float={fc_float}  max_parity_mae_vl={max_parity_mae:.1f}")
 
     if not checkpoint_path.is_file():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
@@ -168,6 +213,7 @@ def main() -> None:
         label_mean=label_mean,
         label_std=label_std,
         max_samples=max_samples,
+        sample_seed=sample_seed,
         batch_size=batch_size,
         num_workers=num_workers,
         prefetch_factor=prefetch_factor,
@@ -175,20 +221,52 @@ def main() -> None:
     )
     print(f"[calibration] samples={len(calib_loader.dataset)}  skipped={skipped}")
 
-    quant_model = quantize_float_nnue(float_model, source_checkpoint=str(checkpoint_path))
+    quant_model = quantize_float_nnue(
+        float_model,
+        source_checkpoint=str(checkpoint_path),
+        fc_float=fc_float,
+    )
     quant_model.label_mean = label_mean
     quant_model.label_std = label_std
 
-    fc0_s, fc1_s, fc2_s = calibrate_fc_input_scales(quant_model, calib_loader, device)
-    print(f"[calibrate] fc input_scales: fc0={fc0_s:.6g}  fc1={fc1_s:.6g}  fc2={fc2_s:.6g}")
+    if fc_float:
+        print("[calibrate] skipped (FC kept float32)")
+    else:
+        fc0_s, fc1_s, fc2_s = calibrate_fc_input_scales(quant_model, calib_loader, device)
+        print(f"[calibrate] fc input_scales: fc0={fc0_s:.6g}  fc1={fc1_s:.6g}  fc2={fc2_s:.6g}")
 
     ft_bytes = quant_model.ft.weight_int8.numel()
-    fc_bytes = (
-        quant_model.fc0.weight_int8.numel()
-        + quant_model.fc1.weight_int8.numel()
-        + quant_model.fc2.weight_int8.numel()
+    if fc_float:
+        fc_bytes = sum(
+            layer.weight.numel() + layer.bias.numel()
+            for layer in (quant_model.fc0, quant_model.fc1, quant_model.fc2)
+            if isinstance(layer, FloatLayerLinear)
+        )
+        print(f"[quantize] ft_int8={ft_bytes:,} weights  fc_float32={fc_bytes:,} params")
+    else:
+        fc_bytes = sum(
+            layer.weight_int8.numel()
+            for layer in (quant_model.fc0, quant_model.fc1, quant_model.fc2)
+            if isinstance(layer, QuantizedLayerLinear)
+        )
+        print(f"[quantize] ft_int8={ft_bytes:,} weights  fc_int8={fc_bytes:,} weights")
+
+    parity = parity_report(
+        float_model,
+        quant_model,
+        calib_loader,
+        device,
+        label_mean=label_mean,
+        label_std=label_std,
     )
-    print(f"[quantize] ft_int8={ft_bytes:,} weights  fc_int8={fc_bytes:,} weights")
+    print(
+        f"[parity] float vs deployed: n={int(parity['n']):,}  "
+        f"mae_vl={parity['mae_vl']:.3f}  p99={parity['p99_vl']:.3f}  max={parity['max_vl']:.3f}"
+    )
+    if parity["mae_vl"] > max_parity_mae:
+        raise RuntimeError(
+            f"Quantized model parity too poor: mae_vl={parity['mae_vl']:.3f} > {max_parity_mae:.1f}"
+        )
 
     print("[eval] comparing float vs int8 on calibration set")
     metrics = evaluate_models(

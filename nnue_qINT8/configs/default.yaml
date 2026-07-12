@@ -1,13 +1,16 @@
 checkpoint: ../nnue_training/checkpoints/best.pt
 data:
   source: ../nnue_data
-  pattern: "worker_*/chunk_*.txt"
-  max_samples: 10000
+  pattern: "merged.txt"
+  max_samples: 50000
+  sample_seed: 42
 
 quantize:
   batch_size: 2048
   num_workers: 4
   prefetch_factor: 2
   device: cpu
+  fc_float: true
+  max_parity_mae_vl: 8.0
 
 output: output/quantized.xqint8.pt

@@ -110,9 +110,17 @@ struct Weights {
   std::vector<std::int32_t> fc2_b;
   std::vector<float> fc2_scales;
 
+  std::vector<float> fc0_w_f32;
+  std::vector<float> fc0_b_f32;
+  std::vector<float> fc1_w_f32;
+  std::vector<float> fc1_b_f32;
+  std::vector<float> fc2_w_f32;
+  std::vector<float> fc2_b_f32;
+
   float fc0_input_scale = 1.f;
   float fc1_input_scale = 1.f;
   float fc2_input_scale = 1.f;
+  bool fc_float = false;
   std::uint32_t format_version = 1;
 };
 
@@ -178,7 +186,7 @@ struct Runtime {
     float act_clip = 1.f;
 
     bool ok = read_exact(f, magic, 8) && std::memcmp(magic, "XQNNUE01", 8) == 0 &&
-              read_exact(f, &version, sizeof(version)) && (version == 1 || version == 2) &&
+              read_exact(f, &version, sizeof(version)) && (version >= 1 && version <= 3) &&
               read_exact(f, &label_mean, sizeof(label_mean)) && read_exact(f, &label_std, sizeof(label_std)) &&
               read_exact(f, &n_features, sizeof(n_features)) && read_exact(f, &l1, sizeof(l1)) &&
               read_exact(f, &l2, sizeof(l2)) && read_exact(f, &l3, sizeof(l3)) &&
@@ -208,11 +216,12 @@ struct Runtime {
     nw.label_mean = label_mean;
     nw.label_std = label_std;
     nw.format_version = version;
-    if (version >= 2) {
+    nw.fc_float = version >= 3;
+    if (version >= 2 && !nw.fc_float) {
       nw.fc0_input_scale = fc0_in;
       nw.fc1_input_scale = fc1_in;
       nw.fc2_input_scale = fc2_in;
-    } else {
+    } else if (version < 2) {
       nw.fc0_input_scale = std::max((ft_clip * ft_clip / 512.f) / 127.f, 1e-6f);
       nw.fc1_input_scale = std::max(act_clip / 127.f, 1e-6f);
       nw.fc2_input_scale = std::max(act_clip / 127.f, 1e-6f);
@@ -220,15 +229,24 @@ struct Runtime {
 
     ok = read_tensor_i8(f, nw.ft_w, static_cast<size_t>(nw.n_features) * static_cast<size_t>(nw.l1)) &&
          read_tensor_i32(f, nw.ft_b, static_cast<size_t>(nw.l1)) &&
-         read_tensor_f32(f, nw.ft_scales, static_cast<size_t>(nw.l1)) &&
-         read_tensor_i8(f, nw.fc0_w, static_cast<size_t>(nw.l2) * static_cast<size_t>(nw.l1)) &&
-         read_tensor_i32(f, nw.fc0_b, static_cast<size_t>(nw.l2)) &&
-         read_tensor_f32(f, nw.fc0_scales, static_cast<size_t>(nw.l2)) &&
-         read_tensor_i8(f, nw.fc1_w, static_cast<size_t>(nw.l3) * static_cast<size_t>(nw.l2 * 2)) &&
-         read_tensor_i32(f, nw.fc1_b, static_cast<size_t>(nw.l3)) &&
-         read_tensor_f32(f, nw.fc1_scales, static_cast<size_t>(nw.l3)) &&
-         read_tensor_i8(f, nw.fc2_w, static_cast<size_t>(nw.l3 * 2)) &&
-         read_tensor_i32(f, nw.fc2_b, 1) && read_tensor_f32(f, nw.fc2_scales, 1);
+         read_tensor_f32(f, nw.ft_scales, static_cast<size_t>(nw.l1));
+    if (ok && nw.fc_float) {
+      ok = read_tensor_f32(f, nw.fc0_w_f32, static_cast<size_t>(nw.l2) * static_cast<size_t>(nw.l1)) &&
+           read_tensor_f32(f, nw.fc0_b_f32, static_cast<size_t>(nw.l2)) &&
+           read_tensor_f32(f, nw.fc1_w_f32, static_cast<size_t>(nw.l3) * static_cast<size_t>(nw.l2 * 2)) &&
+           read_tensor_f32(f, nw.fc1_b_f32, static_cast<size_t>(nw.l3)) &&
+           read_tensor_f32(f, nw.fc2_w_f32, static_cast<size_t>(nw.l3 * 2)) &&
+           read_tensor_f32(f, nw.fc2_b_f32, 1);
+    } else if (ok) {
+      ok = read_tensor_i8(f, nw.fc0_w, static_cast<size_t>(nw.l2) * static_cast<size_t>(nw.l1)) &&
+           read_tensor_i32(f, nw.fc0_b, static_cast<size_t>(nw.l2)) &&
+           read_tensor_f32(f, nw.fc0_scales, static_cast<size_t>(nw.l2)) &&
+           read_tensor_i8(f, nw.fc1_w, static_cast<size_t>(nw.l3) * static_cast<size_t>(nw.l2 * 2)) &&
+           read_tensor_i32(f, nw.fc1_b, static_cast<size_t>(nw.l3)) &&
+           read_tensor_f32(f, nw.fc1_scales, static_cast<size_t>(nw.l3)) &&
+           read_tensor_i8(f, nw.fc2_w, static_cast<size_t>(nw.l3 * 2)) &&
+           read_tensor_i32(f, nw.fc2_b, 1) && read_tensor_f32(f, nw.fc2_scales, 1);
+    }
 
     std::fclose(f);
     if (!ok) {
@@ -359,6 +377,17 @@ struct Runtime {
     }
   }
 
+  void fc_forward_float(const float *w, const float *bias, int out_dim, int in_dim, const float *in, float *out) const {
+    for (int o = 0; o < out_dim; ++o) {
+      const float *row = w + static_cast<size_t>(o) * static_cast<size_t>(in_dim);
+      float sum = bias[o];
+      for (int i = 0; i < in_dim; ++i) {
+        sum += row[i] * in[i];
+      }
+      out[o] = sum;
+    }
+  }
+
   void fc_forward_int8(const std::int8_t *w, const std::int32_t *bias, const float *scales, int out_dim, int in_dim,
                        const float *in, float input_scale, float *out) const {
     std::uint8_t in_q[kMaxL1];
@@ -394,7 +423,11 @@ struct Runtime {
 
     float x0[64];
     float x0_cat[128];
-    fc_forward_int8(w.fc0_w.data(), w.fc0_b.data(), w.fc0_scales.data(), l2, l1, h, w.fc0_input_scale, x0);
+    if (w.fc_float) {
+      fc_forward_float(w.fc0_w_f32.data(), w.fc0_b_f32.data(), l2, l1, h, x0);
+    } else {
+      fc_forward_int8(w.fc0_w.data(), w.fc0_b.data(), w.fc0_scales.data(), l2, l1, h, w.fc0_input_scale, x0);
+    }
     for (int i = 0; i < l2; ++i) {
       x0_cat[i] = sq_clipped_relu(x0[i], w.act_clip);
       x0_cat[l2 + i] = clipped_relu(x0[i], w.act_clip);
@@ -402,14 +435,22 @@ struct Runtime {
 
     float x1[64];
     float x1_cat[128];
-    fc_forward_int8(w.fc1_w.data(), w.fc1_b.data(), w.fc1_scales.data(), l3, l2 * 2, x0_cat, w.fc1_input_scale, x1);
+    if (w.fc_float) {
+      fc_forward_float(w.fc1_w_f32.data(), w.fc1_b_f32.data(), l3, l2 * 2, x0_cat, x1);
+    } else {
+      fc_forward_int8(w.fc1_w.data(), w.fc1_b.data(), w.fc1_scales.data(), l3, l2 * 2, x0_cat, w.fc1_input_scale, x1);
+    }
     for (int i = 0; i < l3; ++i) {
       x1_cat[i] = sq_clipped_relu(x1[i], w.act_clip);
       x1_cat[l3 + i] = clipped_relu(x1[i], w.act_clip);
     }
 
     float x2[1];
-    fc_forward_int8(w.fc2_w.data(), w.fc2_b.data(), w.fc2_scales.data(), 1, l3 * 2, x1_cat, w.fc2_input_scale, x2);
+    if (w.fc_float) {
+      fc_forward_float(w.fc2_w_f32.data(), w.fc2_b_f32.data(), 1, l3 * 2, x1_cat, x2);
+    } else {
+      fc_forward_int8(w.fc2_w.data(), w.fc2_b.data(), w.fc2_scales.data(), 1, l3 * 2, x1_cat, w.fc2_input_scale, x2);
+    }
     return x2[0];
   }
 

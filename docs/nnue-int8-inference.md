@@ -20,10 +20,10 @@ python3 quantize.py
 流程：
 
 1. 加载浮点 `best.pt`
-2. 对称 INT8 量化（FT 按列，FC 按输出通道）
-3. **校准 FC input scale**（在 nnue_data 上扫描各层输入最大值）
-4. 评估 float vs int8 指标
-5. 保存 `output/quantized.xqint8.pt` 与 `output/quantized.xqnnue.bin`
+2. **FT 对称 INT8 量化**（按列）；**FC 头保留 float32**（v3，避免 FC int8 误差放大）
+3. 随机抽样校准集做 **float vs 部署 parity 门禁**（默认 MAE < 8 cp）
+4. 评估 float vs 部署指标
+5. 保存 `output/quantized.xqint8.pt` 与 `output/quantized.xqnnue.bin`（bin **version 3**）
 
 单独导出 bin：
 
@@ -36,12 +36,12 @@ python3 export_bin.py --input output/quantized.xqint8.pt --output output/quantiz
 | 字段 | 说明 |
 |------|------|
 | magic | `XQNNUE01` |
-| version | `2`（v1 仍可读，缺 input scale 时用保守默认） |
+| version | `2` = 全 INT8 FC；`3` = **FT int8 + FC float32**（推荐） |
 | label_mean / label_std | 与训练 checkpoint 一致 |
 | n_features, l1, l2, l3 | 1260, 512, 32, 32 |
 | ft_clip, act_clip | 激活截断 |
-| fc0/1/2_input_scale | **v2 新增**，FC 层输入量化步长 |
-| 权重 | FT + FC0/1/2 的 int8 权重、int32 bias、float scales |
+| fc0/1/2_input_scale | v2：FC 输入量化步长；v3 填 0 |
+| 权重 | v3：FT int8 + FC float32；v2：全部 int8 |
 
 ## INT8 FC 公式
 
