@@ -36,8 +36,9 @@ xqwl_gen_nnue          nnue_training/           nnue_qINT8/              cpp/
 # 1. 生成数据（示例：小规模）
 ./xqwl_gen_nnue --max-positions 10000 --jobs 4 --output-dir nnue_data
 
-# 2. 训练
+# 2. 训练（冒烟 / 正式 GPU）
 cd nnue_training && python3 train.py --config configs/smoke.yaml
+# 或：python3 train.py --config configs/full_gpu.yaml
 
 # 3. 量化 + 导出
 cd nnue_qINT8 && python3 quantize.py
