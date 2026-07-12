@@ -53,7 +53,7 @@ void usage(const char *prog) {
                "  --random-pct PCT       Random move probability 0-100 (default: 20)\n"
                "  --chunk-size N         Positions per chunk file (default: 2000)\n"
                "  --nnue PATH            NNUE weights (.xqnnue.bin); default: auto-detect "
-               "data/nnue_model/\n"
+               "deployment/model/\n"
                "  --pst-only             Force PST eval even when NNUE weights exist\n",
                prog);
 }
@@ -99,17 +99,18 @@ void append_nnue_candidates(std::vector<std::string> &out, const std::string &ba
 }
 
 std::string auto_detect_nnue_path() {
+  // Runtime: prefer deployment/model/ (build_linux.sh copies from data/nnue_model/).
   static const char *kRelFromRoot[] = {
-      "data/nnue_model/quantized.xqnnue.bin",
       "deployment/model/quantized.xqnnue.bin",
+      "data/nnue_model/quantized.xqnnue.bin",
       "nnue_qINT8/output/quantized.xqnnue.bin",
       "quantized.xqnnue.bin",
       nullptr,
   };
   static const char *kRelFromDeployBin[] = {
-      "../../data/nnue_model/quantized.xqnnue.bin",
       "../model/quantized.xqnnue.bin",
       "../../deployment/model/quantized.xqnnue.bin",
+      "../../data/nnue_model/quantized.xqnnue.bin",
       nullptr,
   };
 
@@ -497,7 +498,7 @@ int main(int argc, char **argv) {
                static_cast<long long>(cfg.chunk_size));
   if (cfg.nnue_path.empty()) {
     std::fprintf(stderr, "[xqwl_gen_nnue] eval=PST (no NNUE weights found; use --nnue PATH or "
-                         "place weights in data/nnue_model/)\n");
+                         "run build_linux.sh to populate deployment/model/)\n");
   } else {
     std::fprintf(stderr, "[xqwl_gen_nnue] eval=NNUE (%s)\n", cfg.nnue_path.c_str());
   }

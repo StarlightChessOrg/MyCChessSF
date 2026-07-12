@@ -107,5 +107,5 @@ if compgen -G "$DEPLOY_MODEL/*.xqnnue.bin" > /dev/null; then
 fi
 echo "[build] Web play: pip install -r $DEPLOY/requirements.txt && $DEPLOY_BIN/mycchess-play-web --host 0.0.0.0 --port 5151"
 if [[ -n "$GEN_NAME" ]]; then
-  echo "[build] NNUE data gen: $DEPLOY_BIN/xqwl_gen_nnue --output-dir nnue_data  (auto: data/nnue_model/quantized.xqnnue.bin)"
+  echo "[build] NNUE data gen: $DEPLOY_BIN/xqwl_gen_nnue  (loads $DEPLOY_MODEL/quantized.xqnnue.bin)"
 fi

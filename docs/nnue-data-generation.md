@@ -7,7 +7,7 @@
 - 自对弈采样：每个局面写一行，走子后继续；终局后 `Startup()` 重新开局
 - 走子策略：**20% 随机合法着** / **80% 引擎搜索结果**（可调）
 - **不使用开局库**
-- **评估函数**：默认自动加载 **`data/nnue_model/quantized.xqnnue.bin`**（NNUE 迭代管线 canonical 路径）；亦检测 `deployment/model/`、`nnue_qINT8/output/`。可用 `--nnue PATH` 指定，或 `--pst-only` 强制 PST
+- **评估函数**：默认自动加载 **`deployment/model/quantized.xqnnue.bin`**（`build_linux.sh` 从 `data/nnue_model/` 复制而来）；开发树中亦回退检测 `data/nnue_model/`。可用 `--nnue PATH` 指定，或 `--pst-only` 强制 PST
 - `vl` 为**当前行棋方视角**的根节点搜索分（与 `search_best_detail()['score']` 一致）
 - 默认主搜索最大深度 **6 层**（`--max-depth`），与 `--think-ms` 共同决定标签质量与生成速度
 - FEN 在 C++ 内联编码（`cpp/inc/xqwl_fen.inc`）
@@ -39,7 +39,7 @@
 | `--jobs` | `0`（= CPU 核数） | 并行 worker 数 |
 | `--random-pct` | `20` | 随机走子概率（0–100） |
 | `--chunk-size` | `2000` | 每个分块文件的局面数 |
-| `--nnue` | （自动检测） | NNUE 权重（`.xqnnue.bin`）；默认优先 `data/nnue_model/`，其次 `deployment/model/` |
+| `--nnue` | （自动检测） | 优先 `deployment/model/`，其次 `data/nnue_model/`（见 [data/nnue_model/README.md](../data/nnue_model/README.md)） |
 | `--pst-only` | — | 强制使用 PST，忽略 NNUE 权重 |
 
 ## 输出格式

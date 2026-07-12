@@ -29,8 +29,22 @@ Copy-Item nnue_qINT8\output\quantized.xqnnue.bin data\nnue_model\
 
 ## 部署与搜索
 
-`bash scripts/build_linux.sh` 会将本目录下所有 `*.xqnnue.bin` 复制到 **`deployment/model/`**（发布包内路径）。
+**仓库源目录**：`data/nnue_model/` 存放量化后的 canonical 权重（版本管理 / 迭代入库用）。
 
-**权重迭代默认源**：`xqwl_gen_nnue` 与网页对弈均**优先**加载本目录的 `quantized.xqnnue.bin`；从 `deployment/bin/` 运行时亦会回退查找 `../model/`。量化完成后请更新此目录再生成下一轮 `nnue_data`。
+**运行时目录**：`bash scripts/build_linux.sh` 将 `data/nnue_model/*.xqnnue.bin` 复制到 **`deployment/model/`**。部署包、网页对弈与 `xqwl_gen_nnue` **优先加载 `deployment/model/`**（Release 包内仅有此路径）。
+
+### NNUE 迭代流程
+
+```bash
+# 1. 量化后更新仓库源
+cp nnue_qINT8/output/quantized.xqnnue.bin data/nnue_model/
+
+# 2. 同步进部署目录（build 会自动复制；也可手动）
+cp data/nnue_model/quantized.xqnnue.bin deployment/model/
+# 或：bash scripts/build_linux.sh
+
+# 3. 用 deployment/model 中的权重生成下一轮数据
+./deployment/bin/xqwl_gen_nnue --output-dir nnue_data
+```
 
 `*.bin` / `*.pt` 体积较大，默认 **不入库**（见根目录 `.gitignore`）。
