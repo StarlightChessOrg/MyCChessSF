@@ -180,7 +180,7 @@ async function clickStartPlay(driver) {
 
 async function syncWebBoardFromPage(driver) {
   webLastBoard = await readWebBoard(driver)
-  console.log("[auto] 已从网页同步棋盘状态")
+  console.log(`[auto] 已从网页同步棋盘状态（${countOccupied(webLastBoard)} 个有子格）`)
 }
 
 function diffBoardMove(before, after) {
@@ -304,23 +304,53 @@ async function listPiecesDebug(driver) {
   }
 }
 
+async function getGridMetrics(driver) {
+  const grid = await driver.findElement(By.css("#game-grid"))
+  const rect = await grid.getRect()
+  return { rect, cellW: rect.width / 9, cellH: rect.height / 10 }
+}
+
+async function rectToGridCell(_driver, el, metrics) {
+  const box = await el.getRect()
+  const cx = box.x + box.width / 2 - metrics.rect.x
+  const cy = box.y + box.height / 2 - metrics.rect.y
+  const col = Math.max(1, Math.min(9, Math.floor(cx / metrics.cellW) + 1))
+  const row = Math.max(1, Math.min(10, Math.floor(cy / metrics.cellH) + 1))
+  return { row, col }
+}
+
+function countOccupied(board) {
+  let n = 0
+  for (const row of board) for (const v of row) if (v === 1) n++
+  return n
+}
+
 async function findPieceAtGrid(driver, gridRow, gridCol) {
+  let metrics
+  try {
+    metrics = await getGridMetrics(driver)
+  } catch {
+    return null
+  }
+  const targetX = metrics.rect.x + (gridCol - 0.5) * metrics.cellW
+  const targetY = metrics.rect.y + (gridRow - 0.5) * metrics.cellH
   const pieces = await driver.findElements(By.css(".pieces-container [r]"))
+  let best = null
+  let bestDist = Infinity
   for (const el of pieces) {
-    const r = Number(await el.getAttribute("r"))
-    if (!Number.isFinite(r)) continue
-    const row = 11 - r
-    const cAttr = await el.getAttribute("c")
-    const fAttr = await el.getAttribute("f")
-    const colCandidates = [Number(cAttr), Number(fAttr), Number(cAttr) + 1, Number(fAttr) + 1].filter(
-      Number.isFinite
-    )
-    for (const col of colCandidates) {
-      if (row === gridRow && col === gridCol) {
-        console.log(`[auto] 棋子 grid (${gridRow},${gridCol}) r=${r} c=${col}`)
-        return el
-      }
+    const box = await el.getRect()
+    const cx = box.x + box.width / 2
+    const cy = box.y + box.height / 2
+    const dist = (cx - targetX) ** 2 + (cy - targetY) ** 2
+    if (dist < bestDist) {
+      bestDist = dist
+      best = el
     }
+  }
+  const maxDist = metrics.cellW ** 2 + metrics.cellH ** 2
+  if (best && bestDist <= maxDist * 2) {
+    console.log(`[auto] 棋子(屏幕坐标) grid (${gridRow},${gridCol})`)
+    return best
   }
   return null
 }
@@ -444,6 +474,27 @@ async function waitForBoardDiff(driver, beforeBoard, timeoutMs = 4000) {
     await sleep(200)
   }
   return readWebBoard(driver)
+}
+
+async function detectMoveApplied(driver, beforeBoard, toSite) {
+  const afterBoard = await waitForBoardDiff(driver, beforeBoard, 5000)
+  if (afterBoard.toString() !== beforeBoard.toString()) return afterBoard
+
+  // 相弈棋子无 c 属性；若 #game-grid 读盘滞后，检查目标格是否已有子
+  try {
+    await driver.findElement(
+      By.css(
+        `#game-grid > div:nth-child(${toSite.gridRow}) > div:nth-child(${toSite.gridCol}) > div.square-has-piece`
+      )
+    )
+    if (beforeBoard[toSite.gridRow - 1][toSite.gridCol - 1] === 0) {
+      console.log("[auto] 目标格出现棋子，判定走子成功")
+      return readWebBoard(driver)
+    }
+  } catch {
+    /* not yet */
+  }
+  return null
 }
 
 async function applyMoveOnPage(driver, start, end, attempt) {
@@ -683,8 +734,8 @@ async function doMoveOnWeb(driver, attempt = 0) {
   await driver.executeScript("arguments[0].style.outline='';", start)
   await driver.executeScript("arguments[0].style.outline='';", end)
 
-  const afterBoard = await waitForBoardDiff(driver, beforeBoard)
-  if (afterBoard.toString() === beforeBoard.toString()) {
+  const afterBoard = await detectMoveApplied(driver, beforeBoard, to)
+  if (!afterBoard) {
     const pieces = await listPiecesDebug(driver)
     if (pieces.length) console.warn("[auto] 当前棋子样本", JSON.stringify(pieces.slice(0, 8)))
     console.error("[auto] 网页着法失败，重试")
@@ -697,27 +748,29 @@ async function doMoveOnWeb(driver, attempt = 0) {
 }
 
 async function getWebBoardFromPieces(driver) {
-  const board = Array.from({ length: 10 }, () => Array(9).fill(0))
-  const pieces = await driver.findElements(
-    By.css(".pieces-container > div[r], .pieces-container > div[data-r]")
-  )
+  let metrics
+  try {
+    metrics = await getGridMetrics(driver)
+  } catch {
+    return null
+  }
+  const pieces = await driver.findElements(By.css(".pieces-container [r]"))
   if (pieces.length === 0) return null
+  const board = Array.from({ length: 10 }, () => Array(9).fill(0))
   for (const el of pieces) {
-    const r = Number((await el.getAttribute("r")) || (await el.getAttribute("data-r")))
-    const c = Number((await el.getAttribute("c")) || (await el.getAttribute("data-c")))
-    if (!Number.isFinite(r) || !Number.isFinite(c)) continue
-    const gridRow = 11 - r
-    if (gridRow >= 1 && gridRow <= 10 && c >= 1 && c <= 9) {
-      board[gridRow - 1][c - 1] = 1
-    }
+    const { row, col } = await rectToGridCell(driver, el, metrics)
+    board[row - 1][col - 1] = 1
   }
   return board
 }
 
 async function readWebBoard(driver) {
-  const fromPieces = await getWebBoardFromPieces(driver)
-  if (fromPieces) return fromPieces
-  return getWebBoard(driver)
+  // 相弈棋子只有 r、无 c；优先用 #game-grid 的 square-has-piece
+  const gridBoard = await getWebBoard(driver)
+  if (countOccupied(gridBoard) >= 16) return gridBoard
+  const pieceBoard = await getWebBoardFromPieces(driver)
+  if (pieceBoard && countOccupied(pieceBoard) > countOccupied(gridBoard)) return pieceBoard
+  return gridBoard
 }
 
 async function getWebBoard(driver) {
