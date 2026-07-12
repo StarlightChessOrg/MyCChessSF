@@ -47,11 +47,40 @@
 每行一条样本，制表符分隔：
 
 ```text
-rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1	7
+rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1	7	6	0
 ```
 
-- **左侧**：标准象棋 FEN（红方在 FEN 底部，大写为红）
-- **右侧**：整数搜索分（行棋方视角；开局约 ±1~±15，优势局面 ±100+，将杀级接近 ±9800）
+| 列 | 含义 |
+|----|------|
+| FEN | 标准象棋 FEN（红方在 FEN 底部，大写为红） |
+| 搜索分 | 根节点搜索分（行棋方视角；`search_best_detail()['score']`） |
+| PST | 同一局面的 PST 静态分（行棋方视角；`Position.evaluate()`） |
+| in_check | 行棋方是否被将军：`0` / `1` |
+
+旧版两列 `FEN\tvl` 仍可读入训练，但 **`quiet_only: true` 时需先补 PST 列**（见下节）。
+
+### 为旧数据补充 PST（WSL）
+
+若已有仅含 `FEN\tvl` 的 `merged.txt`（例如在 workspace 根目录），在 WSL 中：
+
+```bash
+cd /mnt/c/Users/79315/Desktop/2/MyCChessSF
+bash scripts/build_linux.sh   # 若尚未编译 xqwlight_core
+bash scripts/augment_merged_wsl.sh
+# 或自定义路径：
+# bash scripts/augment_merged_wsl.sh /path/to/merged.txt ./nnue_data/merged.txt
+```
+
+脚本多进程写入 **`MyCChessSF/nnue_data/merged.txt`**；训练配置 `full_gpu.yaml` 的 `data.source` 指向该目录。
+
+也可直接调用 Python：
+
+```bash
+python3 scripts/augment_nnue_data_pst.py \
+  --input /mnt/c/Users/79315/Desktop/2/nnue_data/merged.txt \
+  --output nnue_data/merged.txt \
+  --workers auto
+```
 
 ## 磁盘与进度
 

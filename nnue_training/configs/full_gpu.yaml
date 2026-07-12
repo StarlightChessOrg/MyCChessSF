@@ -1,6 +1,6 @@
-# 正式 GPU 训练：约 1090 万行 merged.txt（workspace 根目录 nnue_data/）
+# 正式 GPU 训练：nnue_data/merged.txt（仓库内 nnue_data/，需含 PST 列）
 data:
-  source: ../../nnue_data
+  source: ../nnue_data
   pattern: "merged.txt"
   val_ratio: 0.01
   val_seed: 42

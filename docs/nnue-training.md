@@ -48,7 +48,7 @@ python train.py --config configs/full_gpu.yaml
 
 | 参数 | 值 | 说明 |
 |------|-----|------|
-| `data.source` | `../../nnue_data` | 相对 `nnue_training/`，指向 workspace 根目录数据 |
+| `data.source` | `../nnue_data` | 相对 `nnue_training/`，仓库内 `nnue_data/merged.txt`（须含 PST 列） |
 | `data.pattern` | `merged.txt` | 单文件全量数据 |
 | `data.val_ratio` | `0.01` | 随机 1% 作验证集 |
 | `data.load_workers` | `auto` | 多进程加载；`auto` 取 `min(8, CPU 核数)` |
@@ -83,7 +83,7 @@ python train.py --config configs/full_gpu.yaml
 1. **多进程加载** — 读取 `merged.txt` 或分块文件，校验 FEN
 2. **FEN 去重**（默认 `dedupe_fen: true`）— 按「棋盘 + 行棋方」合并重复局面，同一 FEN 多条 `vl` 取**平均值**
 3. **划分 train/val** — 按 `val_ratio` 或 `val_workers`
-4. **静态局面过滤**（默认 `quiet_only: true`）— 仅保留：非将杀区、行棋方未被将军、\|搜索分 − PST\| ≤ `quiet_pst_margin`（需 `xqwlight_core`）
+4. **静态局面过滤**（默认 `quiet_only: true`）— 仅保留：非将杀区、行棋方未被将军、\|搜索分 − PST\| ≤ `quiet_pst_margin`（PST/in_check 来自数据第 3/4 列）
 5. **将杀分重映射**（`quiet_only: false` 时可选 `mate_remap: true`）— 扫描 quiet 极值，\|vl\| ≥ 9800 改为 ±cap
 6. **z-score 统计** — 对训练集计算 mean/std
 7. **特征预计算**（可选）— 多进程生成 PSQ 稀疏索引
@@ -100,7 +100,7 @@ python train.py --config configs/full_gpu.yaml
 | `data.quiet_pst_margin` | `70` | 保留条件：\|vl − PST\| ≤ 此值（cp） |
 | `data.mate_threshold` | `9800` | \|vl\| ≥ 此值视为将杀带并**丢弃**（非 remap） |
 
-依赖：过滤步骤调用 `xqwlight_core.Position`（`set_fen`、`in_check`、`evaluate`）。在 Linux/WSL 下先执行 `scripts/build_linux.sh`，确保扩展位于仓库根目录可 import。
+依赖：数据文件第 3/4 列为 PST 与 `in_check`（新生成的 `xqwl_gen_nnue` 已自带；旧 `FEN\tvl` 需先运行 `scripts/augment_nnue_data_pst.py`，见 [NNUE 训练数据生成](nnue-data-generation.md)）。Windows 训练无需安装 `xqwlight_core`。
 
 `quiet_only: true` 时 **`mate_remap` 应设为 `false`**（配置已默认）；将杀样本已被丢弃，无需再 remap。
 

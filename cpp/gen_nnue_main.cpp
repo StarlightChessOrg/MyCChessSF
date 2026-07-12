@@ -361,7 +361,7 @@ struct ChunkWriter {
       std::perror(current_path.c_str());
       return false;
     }
-    // Line buffering: flush on each "FEN\\tscore\\n" so partial chunks survive crashes.
+    # Line buffering: flush on each "FEN\\tsearch\\tpst\\tin_check\\n" so partial chunks survive crashes.
     setvbuf(fp, io_buf.data(), _IOLBF, io_buf.size());
     chunk_written = 0;
     ++chunks_opened;
@@ -371,10 +371,10 @@ struct ChunkWriter {
     return true;
   }
 
-  bool write_line(const char *fen, int score) {
+  bool write_line(const char *fen, int search_score, int pst_score, int in_check) {
     if (fp == nullptr)
       return false;
-    std::fprintf(fp, "%s\t%d\n", fen, score);
+    std::fprintf(fp, "%s\t%d\t%d\t%d\n", fen, search_score, pst_score, in_check);
     ++chunk_written;
     if (chunk_written >= cfg.chunk_size) {
       ++chunk_idx;
@@ -429,11 +429,13 @@ void worker_main(int worker_id, long long quota, const GenConfig &cfg) {
         ++skipped;
         break;
       }
+      const int pst_score = pos.Evaluate();
+      const int in_check = pos.InCheck() ? 1 : 0;
       PositionStruct search_pos = pos;
       const XqwlSearchOutcome search =
           XqwlSearchBestMoveEx(search_pos, *tab, cfg.think_ms, /*use_book=*/false, cfg.max_depth);
 
-      if (!out.write_line(fen.c_str(), search.score)) {
+      if (!out.write_line(fen.c_str(), search.score, pst_score, in_check)) {
         std::exit(1);
       }
       ++written;

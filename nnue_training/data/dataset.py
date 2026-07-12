@@ -33,6 +33,8 @@ _WORKER_DIR_RE = re.compile(r"^worker_(\d+)$")
 class Sample:
     fen: str
     vl: float
+    pst: float | None = None
+    in_check: bool | None = None
     feat_indices: np.ndarray | None = None
 
 
@@ -44,8 +46,8 @@ def fen_dedupe_key(fen: str) -> str:
     return f"{parts[0]} {parts[1]}"
 
 
-# Accumulator per FEN key: (representative fen, vl_sum, count)
-_DedupeAccum = tuple[str, float, int]
+# Accumulator per FEN key: (representative fen, vl_sum, count, pst, in_check)
+_DedupeAccum = tuple[str, float, int, float | None, bool | None]
 
 
 def _dedupe_group_chunk(samples: list[Sample]) -> dict[str, _DedupeAccum]:
@@ -53,10 +55,10 @@ def _dedupe_group_chunk(samples: list[Sample]) -> dict[str, _DedupeAccum]:
     for sample in samples:
         key = fen_dedupe_key(sample.fen)
         if key not in groups:
-            groups[key] = (sample.fen, sample.vl, 1)
+            groups[key] = (sample.fen, sample.vl, 1, sample.pst, sample.in_check)
         else:
-            fen, vl_sum, count = groups[key]
-            groups[key] = (fen, vl_sum + sample.vl, count + 1)
+            fen, vl_sum, count, pst, in_check = groups[key]
+            groups[key] = (fen, vl_sum + sample.vl, count + 1, pst, in_check)
     return groups
 
 
@@ -64,12 +66,18 @@ def _merge_dedupe_groups(
     groups: dict[str, _DedupeAccum],
     chunk: dict[str, _DedupeAccum],
 ) -> None:
-    for key, (fen, vl_sum, count) in chunk.items():
+    for key, (fen, vl_sum, count, pst, in_check) in chunk.items():
         if key not in groups:
-            groups[key] = (fen, vl_sum, count)
+            groups[key] = (fen, vl_sum, count, pst, in_check)
         else:
-            prev_fen, prev_sum, prev_count = groups[key]
-            groups[key] = (prev_fen, prev_sum + vl_sum, prev_count + count)
+            prev_fen, prev_sum, prev_count, prev_pst, prev_in_check = groups[key]
+            groups[key] = (
+                prev_fen,
+                prev_sum + vl_sum,
+                prev_count + count,
+                prev_pst if prev_pst is not None else pst,
+                prev_in_check if prev_in_check is not None else in_check,
+            )
 
 
 def _finalize_dedupe_chunk(
@@ -77,10 +85,10 @@ def _finalize_dedupe_chunk(
 ) -> tuple[list[Sample], int]:
     deduped: list[Sample] = []
     groups_merged = 0
-    for _key, (fen, vl_sum, count) in items:
+    for _key, (fen, vl_sum, count, pst, in_check) in items:
         if count > 1:
             groups_merged += 1
-        deduped.append(Sample(fen=fen, vl=vl_sum / count))
+        deduped.append(Sample(fen=fen, vl=vl_sum / count, pst=pst, in_check=in_check))
     return deduped, groups_merged
 
 
@@ -99,10 +107,10 @@ def _finalize_dedupe_groups(
     if workers <= 1 or total < 200_000:
         deduped: list[Sample] = []
         groups_merged = 0
-        for index, (_key, (fen, vl_sum, count)) in enumerate(items, start=1):
+        for index, (_key, (fen, vl_sum, count, pst, in_check)) in enumerate(items, start=1):
             if count > 1:
                 groups_merged += 1
-            deduped.append(Sample(fen=fen, vl=vl_sum / count))
+            deduped.append(Sample(fen=fen, vl=vl_sum / count, pst=pst, in_check=in_check))
             if progress_every > 0 and index % progress_every == 0:
                 print(
                     f"[data]   dedupe average {index:,}/{total:,} unique FEN",
@@ -158,10 +166,10 @@ def dedupe_samples_by_fen(
         for index, sample in enumerate(samples, start=1):
             key = fen_dedupe_key(sample.fen)
             if key not in groups:
-                groups[key] = (sample.fen, sample.vl, 1)
+                groups[key] = (sample.fen, sample.vl, 1, sample.pst, sample.in_check)
             else:
-                fen, vl_sum, count = groups[key]
-                groups[key] = (fen, vl_sum + sample.vl, count + 1)
+                fen, vl_sum, count, pst, in_check = groups[key]
+                groups[key] = (fen, vl_sum + sample.vl, count + 1, pst, in_check)
             if progress_every > 0 and index % progress_every == 0:
                 print(
                     f"[data]   dedupe grouped {index:,}/{before:,}  "
@@ -215,16 +223,31 @@ def _parse_line(line: str) -> Sample | None:
     if not line:
         return None
     parts = line.split("\t")
-    if len(parts) != 2:
+    if len(parts) not in (2, 3, 4):
         return None
-    fen, vl_str = parts
+    fen = parts[0]
     if not _is_valid_fen(fen):
         return None
     try:
-        vl = float(vl_str)
+        vl = float(parts[1])
     except ValueError:
         return None
-    return Sample(fen=fen, vl=vl)
+    pst: float | None = None
+    in_check: bool | None = None
+    if len(parts) >= 3:
+        try:
+            pst = float(parts[2])
+        except ValueError:
+            return None
+    if len(parts) == 4:
+        flag = parts[3].strip().lower()
+        if flag in ("1", "true", "yes"):
+            in_check = True
+        elif flag in ("0", "false", "no"):
+            in_check = False
+        else:
+            return None
+    return Sample(fen=fen, vl=vl, pst=pst, in_check=in_check)
 
 
 def _worker_id(path: Path) -> int | None:
@@ -296,6 +319,8 @@ def _featurize_sample(sample: Sample) -> Sample:
     return Sample(
         fen=sample.fen,
         vl=sample.vl,
+        pst=sample.pst,
+        in_check=sample.in_check,
         feat_indices=fen_to_feature_indices(sample.fen),
     )
 
@@ -729,6 +754,8 @@ def remap_mate_labels_in_samples(
                 Sample(
                     fen=sample.fen,
                     vl=new_vl,
+                    pst=sample.pst,
+                    in_check=sample.in_check,
                     feat_indices=sample.feat_indices,
                 )
             )
