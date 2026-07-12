@@ -88,6 +88,8 @@ chmod +x "$DEPLOY_BIN/mycchess-play-web" "$DEPLOY_BIN/mycchess-xiangqi-bridge"
 mkdir -p "$DEPLOY/tools"
 cp -a "$ROOT/tools/auto" "$DEPLOY/tools/auto"
 find "$DEPLOY/tools/auto" -type d -name node_modules -exec rm -rf {} + 2>/dev/null || true
+strip_crlf "$DEPLOY/tools/auto/start-from-wsl.sh"
+chmod +x "$DEPLOY/tools/auto/start-from-wsl.sh"
 cp -f scripts/deployment_requirements.txt "$DEPLOY/requirements.txt"
 if [[ -n "$GEN_NAME" ]]; then
   cp -f "$ROOT/$GEN_NAME" "$DEPLOY_BIN/"

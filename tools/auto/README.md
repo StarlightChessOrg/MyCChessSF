@@ -46,21 +46,36 @@ mycchess-xiangqi-bridge --think-ms 1000
 
 默认：红方引擎、开局库（若已 build）、NNUE（若存在 `deployment/model/`）。
 
-### 2. 安装并启动 Selenium 桥（终端 B，**Windows PowerShell**）
+### 2. 启动 Selenium 桥（终端 B，**必须 Windows**）
 
-> 不要在 WSL bash 里跑 `npm start`。Selenium 需要启动 **Windows 版 Edge**；在 bash 里写 `$env:...` 会报错，且环境变量也传不对。
+> **不要在 WSL bash 里 `npm start`。**  
+> WSL 里的 `npm` 常无法正确调用 Windows Node/Edge，会报 `WSL 1 is not supported` 或 `Could not determine Node.js install directory`。  
+> 终端 A 可在 WSL 跑桥接；终端 B 请用 **Windows PowerShell**，或 WSL 里运行 `./start-from-wsl.sh`。
+
+**方式 A — Windows PowerShell（推荐）**
 
 ```powershell
-cd C:\Users\79315\Desktop\2\MyCChessSF\deployment\tools\auto   # 或仓库 tools\auto
-npm install
-$env:OPPONENT_LEVEL = "9"   # 相弈人机等级 1–9（可省略，默认就是 9）
-npm start
+cd C:\Users\79315\Desktop\2\MyCChessSF\deployment\tools\auto
+.\start-windows.ps1 -OpponentLevel 9
+# 桥在 WSL 时：.\start-windows.ps1 -BridgeHost 172.x.x.x
 ```
 
-若在 WSL 里必须一键启动，可：
+**方式 B — 仍在 WSL 终端，但转交 Windows**
 
 ```bash
-powershell.exe -NoProfile -Command "cd 'C:\Users\79315\Desktop\2\MyCChessSF\deployment\tools\auto'; `$env:OPPONENT_LEVEL='9'; npm start"
+cd /mnt/c/Users/79315/Desktop/2/MyCChessSF/deployment/tools/auto
+chmod +x start-from-wsl.sh
+./start-from-wsl.sh
+# 可选：OPPONENT_LEVEL=9 BRIDGE_HOST=172.x.x.x ./start-from-wsl.sh
+```
+
+**方式 C — 手动 PowerShell**
+
+```powershell
+cd C:\Users\79315\Desktop\2\MyCChessSF\deployment\tools\auto
+npm install
+$env:OPPONENT_LEVEL = "9"
+npm start
 ```
 
 脚本会打开相弈「人机对战」，选择对应等级 bot，随后自动代引擎走子。
@@ -94,6 +109,8 @@ powershell.exe -NoProfile -Command "cd 'C:\Users\79315\Desktop\2\MyCChessSF\depl
 | 文件 | 说明 |
 |------|------|
 | `selenium_xiangqi_com_auto.js` | Selenium 主脚本（相弈网页 ↔ :9494） |
+| `start-windows.ps1` | Windows PowerShell 启动器 |
+| `start-from-wsl.sh` | WSL 一键转交 Windows 启动 |
 | `package.json` | Node 依赖 `selenium-webdriver` |
 
 Python 桥接：`mycchess_sf/xiangqi_auto_bridge.py`  
@@ -101,7 +118,8 @@ Python 桥接：`mycchess_sf/xiangqi_auto_bridge.py`
 
 ## 常见问题
 
-- **只开了 bridge、网页没反应**：正常。桥接是 HTTP 服务端，**必须另开 Windows PowerShell** 运行 `npm start`（见上文终端 B）。WSL 里只跑 bridge 不会打开 [play.xiangqi.com/computer](https://play.xiangqi.com/computer)。
+- **只开了 bridge、网页没反应**：正常。桥接是 HTTP 服务端，**必须另开 Windows 端 Selenium**（见上文终端 B）。WSL 里只跑 bridge 不会打开 [play.xiangqi.com/computer](https://play.xiangqi.com/computer)。
+- **WSL 里 npm start 失败**：正常现象。用 PowerShell 的 `.\start-windows.ps1`，或 WSL 里 `./start-from-wsl.sh`。
 - **Windows 连不上 :9494**：WSL 桥接时，PowerShell 执行 `wsl hostname -I` 取 IP，设 `$env:BRIDGE_HOST = "<IP>"` 再 `npm start`。
 - **桥接无着法**：确认 `xqwlight_core` 已编译、BOOK/NNUE 路径正确；看 `[bridge] engine ->` 日志。
 - **网页着法失败**：相弈 DOM 变更会导致选择器失效；可设 `XIANGQI_URL=https://play.xiangqi.com/computer`。
