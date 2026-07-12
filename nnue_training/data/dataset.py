@@ -59,19 +59,44 @@ def _worker_id(path: Path) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def load_samples(source: str | Path, pattern: str = DEFAULT_DATA_PATTERN) -> tuple[list[Sample], int]:
+def load_samples(
+    source: str | Path,
+    pattern: str = DEFAULT_DATA_PATTERN,
+    *,
+    progress_every: int = 500_000,
+) -> tuple[list[Sample], int]:
     root = Path(source)
     files = sorted(glob.glob(str(root / pattern)))
+    if not files:
+        return [], 0
+
     samples: list[Sample] = []
     skipped = 0
+    total_lines = 0
+
     for fp in files:
-        with open(fp, encoding="utf-8", errors="replace") as f:
+        path = Path(fp)
+        print(f"[data] loading {path.name} ...", flush=True)
+        with open(path, encoding="utf-8", errors="replace") as f:
             for line in f:
+                total_lines += 1
                 s = _parse_line(line)
                 if s is not None:
                     samples.append(s)
                 elif line.strip():
                     skipped += 1
+                if progress_every > 0 and total_lines % progress_every == 0:
+                    print(
+                        f"[data]   {total_lines:,} lines read, "
+                        f"{len(samples):,} valid, {skipped:,} skipped",
+                        flush=True,
+                    )
+
+    print(
+        f"[data] load complete: {total_lines:,} lines, "
+        f"{len(samples):,} valid, {skipped:,} skipped",
+        flush=True,
+    )
     return samples, skipped
 
 
@@ -111,16 +136,19 @@ def split_samples_by_ratio(
     if not 0.0 < val_ratio < 1.0:
         raise ValueError(f"val_ratio must be in (0, 1), got {val_ratio}")
 
+    print(f"[data] val_ratio={val_ratio}  seed={seed}", flush=True)
     samples, skipped = load_samples(source, pattern)
     if not samples:
         raise ValueError(f"No samples found under {source} with pattern {pattern!r}")
 
+    print(f"[data] shuffling {len(samples):,} samples ...", flush=True)
     rng = random.Random(seed)
     indices = list(range(len(samples)))
     rng.shuffle(indices)
     n_val = max(1, int(len(samples) * val_ratio))
     val_indices = set(indices[:n_val])
 
+    print(f"[data] splitting train/val (val={n_val:,}) ...", flush=True)
     train_set = [samples[i] for i in range(len(samples)) if i not in val_indices]
     val_set = [samples[i] for i in range(len(samples)) if i in val_indices]
     return train_set, val_set, skipped

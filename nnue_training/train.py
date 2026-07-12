@@ -166,10 +166,10 @@ def train_epoch(
         total_loss += loss.item() * bs
         n += bs
 
-        if log_every > 0 and step % log_every == 0:
+        if log_every > 0 and (step == 1 or step % log_every == 0):
             avg = total_loss / n
             elapsed = time.time() - t0
-            print(f"  epoch {epoch} step {step}  train_loss={avg:.6f}  ({elapsed:.1f}s)")
+            print(f"  epoch {epoch} step {step}  train_loss={avg:.6f}  ({elapsed:.1f}s)", flush=True)
 
     return total_loss / max(n, 1)
 
@@ -189,7 +189,7 @@ def main() -> None:
     device = torch.device(train_cfg.get("device", "cpu"))
 
     pattern = data_cfg.get("pattern", DEFAULT_DATA_PATTERN)
-    print(f"[data] source={data_source}  pattern={pattern!r}")
+    print(f"[data] source={data_source}  pattern={pattern!r}", flush=True)
 
     if "val_ratio" in data_cfg:
         train_samples, val_samples, skipped = split_samples_by_ratio(
@@ -204,10 +204,11 @@ def main() -> None:
             pattern,
             data_cfg.get("val_workers", [30, 31]),
         )
-    print(f"[data] train={len(train_samples)}  val={len(val_samples)}  skipped={skipped}")
+    print(f"[data] train={len(train_samples):,}  val={len(val_samples):,}  skipped={skipped:,}", flush=True)
 
+    print("[label] computing z-score stats ...", flush=True)
     label_mean, label_std = compute_zscore_stats(train_samples)
-    print(f"[label] z-score mean={label_mean:.4f}  std={label_std:.4f}")
+    print(f"[label] z-score mean={label_mean:.4f}  std={label_std:.4f}", flush=True)
 
     train_ds = NnueDataset(train_samples, label_mean=label_mean, label_std=label_std)
     val_ds = NnueDataset(val_samples, label_mean=label_mean, label_std=label_std)
