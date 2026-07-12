@@ -384,9 +384,11 @@ def main() -> None:
 
     pattern = data_cfg.get("pattern", DEFAULT_DATA_PATTERN)
     load_workers = data_cfg.get("load_workers", "auto")
+    dedupe_fen = bool(data_cfg.get("dedupe_fen", True))
     _, load_workers_label = parse_worker_count(load_workers)
     print(
-        f"[data] source={data_source}  pattern={pattern!r}  load_workers={load_workers_label}",
+        f"[data] source={data_source}  pattern={pattern!r}  load_workers={load_workers_label}  "
+        f"dedupe_fen={dedupe_fen}",
         flush=True,
     )
 
@@ -397,6 +399,7 @@ def main() -> None:
             float(data_cfg["val_ratio"]),
             seed=int(data_cfg.get("val_seed", 42)),
             load_workers=load_workers,
+            dedupe_fen=dedupe_fen,
         )
     else:
         train_samples, val_samples, skipped = split_samples(
@@ -404,6 +407,7 @@ def main() -> None:
             pattern,
             data_cfg.get("val_workers", [30, 31]),
             load_workers=load_workers,
+            dedupe_fen=dedupe_fen,
         )
     print(f"[data] train={len(train_samples):,}  val={len(val_samples):,}  skipped={skipped:,}", flush=True)
 

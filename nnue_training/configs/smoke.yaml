@@ -2,6 +2,7 @@ data:
   source: ../nnue_data
   pattern: "worker_*/chunk_*.txt"
   val_workers: [30, 31]
+  dedupe_fen: true
   mate_threshold: 9800
   mate_exclude_from_zscore: true
 

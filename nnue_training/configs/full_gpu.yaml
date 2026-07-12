@@ -5,6 +5,7 @@ data:
   val_ratio: 0.01
   val_seed: 42
   load_workers: auto
+  dedupe_fen: true
   mate_threshold: 9800
   mate_exclude_from_zscore: true
 

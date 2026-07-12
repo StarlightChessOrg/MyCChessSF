@@ -36,6 +36,45 @@ class Sample:
     feat_indices: np.ndarray | None = None
 
 
+def fen_dedupe_key(fen: str) -> str:
+    """Position key for dedup: board + side to move (ignores move counters)."""
+    parts = fen.strip().split()
+    if len(parts) < 2:
+        return fen.strip()
+    return f"{parts[0]} {parts[1]}"
+
+
+def dedupe_samples_by_fen(samples: list[Sample]) -> tuple[list[Sample], dict[str, int]]:
+    """Merge duplicate positions; keep the median ``vl`` per FEN key."""
+    if not samples:
+        return [], {"before": 0, "after": 0, "removed": 0, "groups_merged": 0}
+
+    groups: dict[str, tuple[str, list[float]]] = {}
+    for sample in samples:
+        key = fen_dedupe_key(sample.fen)
+        if key not in groups:
+            groups[key] = (sample.fen, [sample.vl])
+        else:
+            fen, values = groups[key]
+            values.append(sample.vl)
+
+    deduped: list[Sample] = []
+    groups_merged = 0
+    for fen, values in groups.values():
+        if len(values) > 1:
+            groups_merged += 1
+        deduped.append(Sample(fen=fen, vl=float(np.median(values))))
+
+    before = len(samples)
+    after = len(deduped)
+    return deduped, {
+        "before": before,
+        "after": after,
+        "removed": before - after,
+        "groups_merged": groups_merged,
+    }
+
+
 def _is_valid_fen(fen: str) -> bool:
     try:
         parse_fen_board(fen)
@@ -467,6 +506,7 @@ def split_samples(
     val_workers: list[int],
     *,
     load_workers: object = "auto",
+    dedupe_fen: bool = True,
 ) -> tuple[list[Sample], list[Sample], int]:
     root = Path(source)
     val_ids = set(val_workers)
@@ -476,8 +516,25 @@ def split_samples(
 
     workers = _resolve_load_workers(load_workers)
     if workers <= 1 or len(files) <= 1:
-        return _split_files_serial(files, val_ids)
-    return _split_files_parallel(files, val_ids, load_workers=workers)
+        train_set, val_set, skipped = _split_files_serial(files, val_ids)
+    else:
+        train_set, val_set, skipped = _split_files_parallel(files, val_ids, load_workers=workers)
+
+    if dedupe_fen:
+        train_set, train_stats = dedupe_samples_by_fen(train_set)
+        val_set, val_stats = dedupe_samples_by_fen(val_set)
+        print(
+            f"[data] dedupe train: {train_stats['before']:,} -> {train_stats['after']:,} "
+            f"(removed {train_stats['removed']:,}, merged {train_stats['groups_merged']:,})",
+            flush=True,
+        )
+        print(
+            f"[data] dedupe val:   {val_stats['before']:,} -> {val_stats['after']:,} "
+            f"(removed {val_stats['removed']:,}, merged {val_stats['groups_merged']:,})",
+            flush=True,
+        )
+
+    return train_set, val_set, skipped
 
 
 def split_samples_by_ratio(
@@ -487,14 +544,23 @@ def split_samples_by_ratio(
     *,
     seed: int = 42,
     load_workers: object = "auto",
+    dedupe_fen: bool = True,
 ) -> tuple[list[Sample], list[Sample], int]:
     if not 0.0 < val_ratio < 1.0:
         raise ValueError(f"val_ratio must be in (0, 1), got {val_ratio}")
 
-    print(f"[data] val_ratio={val_ratio}  seed={seed}", flush=True)
+    print(f"[data] val_ratio={val_ratio}  seed={seed}  dedupe_fen={dedupe_fen}", flush=True)
     samples, skipped = load_samples(source, pattern, load_workers=load_workers)
     if not samples:
         raise ValueError(f"No samples found under {source} with pattern {pattern!r}")
+
+    if dedupe_fen:
+        samples, stats = dedupe_samples_by_fen(samples)
+        print(
+            f"[data] dedupe: {stats['before']:,} -> {stats['after']:,} unique FEN "
+            f"(removed {stats['removed']:,}, merged {stats['groups_merged']:,} groups)",
+            flush=True,
+        )
 
     print(f"[data] shuffling {len(samples):,} samples ...", flush=True)
     rng = random.Random(seed)
