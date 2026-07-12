@@ -81,7 +81,7 @@ inline bool XqwlSearchMakeMove(int mv) {
   }
   if (!XQWL_SEARCH_POS.MakeMove(mv)) {
     if (nnue != nullptr && nnue->loaded) {
-      nnue->acc_undo(g_xqwl_sc->nnue_st);
+      nnue->acc_undo(g_xqwl_sc->nnue_st, XQWL_SEARCH_POS);
     }
     return false;
   }
@@ -92,7 +92,7 @@ inline void XqwlSearchUndoMakeMove() {
   xqwl_nnue::Runtime *nnue =
       (g_xqwl_sc != nullptr && g_xqwl_sc->tab != nullptr) ? g_xqwl_sc->tab->nnue : nullptr;
   if (nnue != nullptr && nnue->loaded) {
-    nnue->acc_undo(g_xqwl_sc->nnue_st);
+    nnue->acc_undo(g_xqwl_sc->nnue_st, XQWL_SEARCH_POS);
   }
   XQWL_SEARCH_POS.UndoMakeMove();
 }

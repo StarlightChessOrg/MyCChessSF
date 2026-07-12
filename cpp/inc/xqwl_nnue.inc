@@ -8,6 +8,7 @@
 #ifndef XQWL_NNUE_INC
 #define XQWL_NNUE_INC
 
+#include "xqwl_halfka.inc"
 #include "xqwl_nnue_simd.h"
 
 #include <algorithm>
@@ -20,75 +21,21 @@
 namespace xqwl_nnue {
 
 constexpr int kSquares = 90;
-constexpr int kKinds = 7;
-constexpr int kFeatures = kKinds * kSquares * 2;
-constexpr int kEnemyOffset = kKinds * kSquares;
-constexpr int kMaxActive = 40;
+constexpr int kFeatures = xqwl_halfka::kFeatures;
+constexpr int kMaxActive = xqwl_halfka::kMaxActive;
 constexpr int kMaxL1 = 512;
 constexpr int kMaxDelta = 4;
 
+inline int coord_xy_iccs(int x, int y) { return xqwl_halfka::coord_xy_iccs(x, y); }
+
 // Mate / extreme score handling (XQWL centipawn scale).
-constexpr int kMateZonePst = WIN_VALUE - 800;   // PST says winning/losing huge
-constexpr int kNnueHardClamp = 3200;            // compress beyond this
-constexpr int kNnueSoftClamp = 2400;            // typical reliable zone
-constexpr int kTacticalBlendPst = 1500;         // blend when PST is large
-
-inline int coord_xy_iccs(int x, int y) { return (x + 3) + ((y + 3) << 4); }
-inline int iccs_x_from_sq(int sq) { return (sq & 15) - 3; }
-inline int iccs_y_from_sq(int sq) { return (sq >> 4) - 3; }
-
-inline int feature_index(int kind, int sq, bool friendly) {
-  const int base = friendly ? 0 : kEnemyOffset;
-  return base + kind * kSquares + sq;
-}
-
-inline int piece_kind(BYTE pc) {
-  if (pc < 16) {
-    return static_cast<int>(pc) - 8;
-  }
-  return static_cast<int>(pc) - 16;
-}
-
-inline int feature_from_sq_pc(int sq, BYTE pc, int virtual_stm) {
-  if (!pc) {
-    return -1;
-  }
-  const int kind = piece_kind(pc);
-  if (kind < 0 || kind > 6) {
-    return -1;
-  }
-  const int x = iccs_x_from_sq(sq);
-  const int y = iccs_y_from_sq(sq);
-  if (x < 0 || x > 8 || y < 0 || y > 9) {
-    return -1;
-  }
-  bool friendly;
-  int view_y;
-  if (virtual_stm == 0) {
-    friendly = pc < 16;
-    view_y = y;
-  } else {
-    friendly = pc >= 16;
-    view_y = 9 - y;
-  }
-  return feature_index(kind, view_y * 9 + x, friendly);
-}
+constexpr int kMateZonePst = WIN_VALUE - 800;
+constexpr int kNnueHardClamp = 3200;
+constexpr int kNnueSoftClamp = 2400;
+constexpr int kTacticalBlendPst = 1500;
 
 inline void extract_features_perspective(const PositionStruct &pos, int virtual_stm, int *out, int &count) {
-  count = 0;
-  for (int y = 0; y < 10; ++y) {
-    for (int x = 0; x < 9; ++x) {
-      const int sq = coord_xy_iccs(x, y);
-      const BYTE pc = pos.ucpcSquares[sq];
-      if (!pc) {
-        continue;
-      }
-      const int idx = feature_from_sq_pc(sq, pc, virtual_stm);
-      if (idx >= 0 && count < kMaxActive) {
-        out[count++] = idx;
-      }
-    }
-  }
+  xqwl_halfka::extract_features_perspective(pos, virtual_stm, out, count);
 }
 
 struct Weights {
@@ -124,6 +71,7 @@ struct Weights {
 };
 
 struct AccDelta {
+  bool refresh[2]{};
   std::int8_t n_rem[2]{};
   std::int8_t n_add[2]{};
   std::int16_t rem[2][kMaxDelta]{};
@@ -295,21 +243,35 @@ struct Runtime {
     const BYTE pc = pos.ucpcSquares[sq_src];
     const BYTE cap = pos.ucpcSquares[sq_dst];
 
+    PositionStruct after = pos;
+    if (!after.MakeMove(mv)) {
+      --st.stack_top;
+      return;
+    }
+
     for (int persp = 0; persp < 2; ++persp) {
-      // Update both FT encodings; only acc[sdPlayer] is read at eval time.
+      d.refresh[persp] = false;
       d.n_rem[persp] = 0;
       d.n_add[persp] = 0;
-      const int f_src = feature_from_sq_pc(sq_src, pc, persp);
+
+      if (!xqwl_halfka::feature_bucket_equal(pos, after, persp)) {
+        d.refresh[persp] = true;
+        acc_refresh_perspective(st, persp, after);
+        continue;
+      }
+
+      const xqwl_halfka::FeatureBucket fb = xqwl_halfka::make_feature_bucket(pos, persp);
+      const int f_src = xqwl_halfka::feature_from_iccs(sq_src, pc, persp, fb.bucket, fb.mirror);
       if (f_src >= 0) {
         d.rem[persp][d.n_rem[persp]++] = static_cast<std::int16_t>(f_src);
       }
       if (cap) {
-        const int f_cap = feature_from_sq_pc(sq_dst, cap, persp);
+        const int f_cap = xqwl_halfka::feature_from_iccs(sq_dst, cap, persp, fb.bucket, fb.mirror);
         if (f_cap >= 0) {
           d.rem[persp][d.n_rem[persp]++] = static_cast<std::int16_t>(f_cap);
         }
       }
-      const int f_dst = feature_from_sq_pc(sq_dst, pc, persp);
+      const int f_dst = xqwl_halfka::feature_from_iccs(sq_dst, pc, persp, fb.bucket, fb.mirror);
       if (f_dst >= 0) {
         d.add[persp][d.n_add[persp]++] = static_cast<std::int16_t>(f_dst);
       }
@@ -318,12 +280,16 @@ struct Runtime {
     }
   }
 
-  void acc_undo(SearchState &st) const {
+  void acc_undo(SearchState &st, const PositionStruct &pos) const {
     if (!st.ready || st.stack_top <= 0) {
       return;
     }
     AccDelta &d = st.stack[--st.stack_top];
     for (int persp = 0; persp < 2; ++persp) {
+      if (d.refresh[persp]) {
+        acc_refresh_perspective(st, persp, pos);
+        continue;
+      }
       acc_apply_column_delta(st, persp, d.add[persp], d.n_add[persp], -1);
       acc_apply_column_delta(st, persp, d.rem[persp], d.n_rem[persp], +1);
     }
