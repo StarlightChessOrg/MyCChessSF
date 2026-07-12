@@ -74,6 +74,11 @@ cp -a "$ROOT/mycchess_sf" "$DEPLOY_LIB/mycchess_sf"
 find "$DEPLOY_LIB/mycchess_sf" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 cp -f scripts/deployment_play_web.sh "$DEPLOY_BIN/mycchess-play-web"
 chmod +x "$DEPLOY_BIN/mycchess-play-web"
+cp -f scripts/deployment_xiangqi_bridge.sh "$DEPLOY_BIN/mycchess-xiangqi-bridge"
+chmod +x "$DEPLOY_BIN/mycchess-xiangqi-bridge"
+mkdir -p "$DEPLOY/tools"
+cp -a "$ROOT/tools/auto" "$DEPLOY/tools/auto"
+find "$DEPLOY/tools/auto" -type d -name node_modules -exec rm -rf {} + 2>/dev/null || true
 cp -f scripts/deployment_requirements.txt "$DEPLOY/requirements.txt"
 if [[ -n "$GEN_NAME" ]]; then
   cp -f "$ROOT/$GEN_NAME" "$DEPLOY_BIN/"
@@ -97,15 +102,17 @@ echo "[build] Done."
 echo "[build] Deployment: $DEPLOY"
 echo "[build]   lib/  -> $SO_NAME + mycchess_sf/ (网页对弈 Python 包)"
 if [[ -n "$GEN_NAME" ]]; then
-  echo "[build]   bin/  -> $GEN_NAME, mycchess-play-web"
+  echo "[build]   bin/  -> $GEN_NAME, mycchess-play-web, mycchess-xiangqi-bridge"
 else
-  echo "[build]   bin/  -> mycchess-play-web"
+  echo "[build]   bin/  -> mycchess-play-web, mycchess-xiangqi-bridge"
 fi
+echo "[build]   tools/auto/ -> 相弈 Selenium 脚本（Windows 端 npm install 后使用）"
 echo "[build]   db/   -> BOOK.DAT"
 if compgen -G "$DEPLOY_MODEL/*.xqnnue.bin" > /dev/null; then
   echo "[build]   model/ -> NNUE weights"
 fi
 echo "[build] Web play: pip install -r $DEPLOY/requirements.txt && $DEPLOY_BIN/mycchess-play-web --host 0.0.0.0 --port 5151"
+echo "[build] Xiangqi bridge: $DEPLOY_BIN/mycchess-xiangqi-bridge --think-ms 1000  (相弈 auto :9494)"
 if [[ -n "$GEN_NAME" ]]; then
   echo "[build] NNUE data gen: $DEPLOY_BIN/xqwl_gen_nnue  (loads $DEPLOY_MODEL/quantized.xqnnue.bin)"
 fi

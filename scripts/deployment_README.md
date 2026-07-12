@@ -12,8 +12,11 @@ deployment/
 │   ├── xqwlight_core*.so      C++ 引擎扩展（规则 + 搜索 + NNUE）
 │   └── mycchess_sf/            网页对弈 Python 包（含 static/xqwl 界面资源）
 ├── bin/
-│   ├── mycchess-play-web      网页对弈启动脚本
-│   └── xqwl_gen_nnue          NNUE 训练数据生成器
+│   ├── mycchess-play-web          网页对弈启动脚本
+│   ├── mycchess-xiangqi-bridge    相弈象棋 HTTP 桥（:9494）
+│   └── xqwl_gen_nnue              NNUE 训练数据生成器
+├── tools/
+│   └── auto/                      相弈 Selenium 脚本（z.js；Windows + Edge）
 ├── db/
 │   └── BOOK.DAT               开局库
 └── model/
@@ -37,6 +40,35 @@ pip install -r deployment/requirements.txt
 ./deployment/bin/mycchess-play-web --book /path/to/other/BOOK.DAT
 ```
 
+## 相弈象棋自动对弈桥（:9494）
+
+供 `tools/auto/z.js`（Selenium）连接，协议与 Chess98 UI 模式兼容。桥接服务跑在 **Linux 部署包** 上；Selenium 脚本通常在 **Windows + Edge** 端执行。
+
+```bash
+./deployment/bin/mycchess-xiangqi-bridge --think-ms 1000
+```
+
+默认加载 `deployment/db/BOOK.DAT` 与 `deployment/model/quantized.xqnnue.bin`（若存在）。
+
+常用参数：
+
+```bash
+./deployment/bin/mycchess-xiangqi-bridge --port 9494 --engine-color red
+./deployment/bin/mycchess-xiangqi-bridge --no-book --no-nnue-default
+```
+
+Windows 端（与桥接同网或本机 WSL 端口转发）：
+
+```powershell
+cd deployment\tools\auto
+npm install
+$env:BRIDGE_HOST = "127.0.0.1"
+$env:OPPONENT_LEVEL = "9"
+npm start
+```
+
+详见 `deployment/tools/auto/README.md`。
+
 ## Python 引擎 API
 
 ```python
@@ -57,7 +89,7 @@ engine.load_nnue("deployment/model/quantized.xqnnue.bin")
 
 ## 说明
 
-- **对弈程序**即 `bin/mycchess-play-web` + `lib/mycchess_sf/`，不是单独的二进制，需 Python 3.10+ 与 `requirements.txt` 中的依赖。
+- **对弈程序**即 `bin/mycchess-play-web` + `lib/mycchess_sf/`；**相弈桥**为 `bin/mycchess-xiangqi-bridge` + 同目录 `lib/`。均需 Python 3.10+ 与 `requirements.txt` 中的依赖。
 - `lib/` 放 `.so` 与 Python 包；`bin/` 放可执行脚本/程序。
 - `xqwlight_core*.so` 与构建所用 Python 版本绑定，换 Python 需重新运行 `build_linux.sh`。
 - 完整开发流程见仓库 `docs/`。
