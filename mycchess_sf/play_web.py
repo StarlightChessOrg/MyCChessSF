@@ -503,7 +503,7 @@ def _html_page() -> str:
       background:var(--bg);min-height:100vh}}
     .win{{max-width:1280px;margin:0 auto;padding:12px 16px 20px}}
     .titlebar{{font-size:15px;font-weight:600;margin-bottom:10px}}
-    .layout{{display:grid;grid-template-columns:minmax(300px,340px) minmax(0,1fr) 260px;gap:16px;align-items:start}}
+    .layout{{display:grid;grid-template-columns:minmax(320px,380px) minmax(0,1fr) 260px;gap:16px;align-items:start}}
     @media(max-width:1180px){{.layout{{grid-template-columns:1fr}} .think-panel{{order:3}}}}
     .board-wrap{{display:flex;justify-content:center}}
     .board-shell{{background:#8b7355;padding:6px;border:1px solid #5c4a32;box-shadow:0 2px 8px rgba(0,0,0,.25)}}
@@ -532,10 +532,22 @@ def _html_page() -> str:
     .think-panel{{background:var(--panel);border:1px solid #b9a88d;padding:14px 16px;align-self:stretch}}
     .think-panel h2{{font-size:15px;margin:0 0 8px}}
     .think-panel .hint{{font-size:12px;color:#5c4a32;margin-bottom:10px}}
-    #think-log-body{{font-family:Consolas,"Microsoft YaHei",monospace;font-size:11px;line-height:1.5;
-      max-height:min(560px,calc(100vh - 120px));overflow:auto;overflow-x:auto;background:rgba(255,255,255,.45);
-      padding:8px;border:1px solid #c9b89a;min-width:0}}
-    .think-line{{margin:0 0 6px;white-space:nowrap}}
+    #think-log-body{{max-height:min(560px,calc(100vh - 120px));overflow:auto;background:rgba(255,255,255,.45);
+      padding:6px;border:1px solid #c9b89a;min-width:0}}
+    #think-log-table{{border-collapse:collapse;width:100%;font-family:Consolas,"Microsoft YaHei",monospace;
+      font-size:11px;line-height:1.45;table-layout:fixed}}
+    #think-log-table th,#think-log-table td{{padding:3px 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+      border-bottom:1px solid rgba(201,184,154,.55);vertical-align:middle}}
+    #think-log-table thead th{{position:sticky;top:0;z-index:1;background:#e8dcc8;color:#3d2f1f;font-weight:600;
+      border-bottom:1px solid #b9a88d;font-size:11px}}
+    #think-log-table tbody tr:last-child td{{border-bottom:none}}
+    #think-log-table tbody tr:hover td{{background:rgba(255,255,255,.35)}}
+    #think-log-table .col-depth{{width:2.6em;text-align:center}}
+    #think-log-table .col-ms{{width:3.6em;text-align:right;font-variant-numeric:tabular-nums}}
+    #think-log-table .col-vl{{width:4ch;min-width:4ch;text-align:right;font-variant-numeric:tabular-nums;
+      letter-spacing:0;font-feature-settings:"tnum" 1}}
+    #think-log-table .col-piece{{width:2em;text-align:center;font-family:"Microsoft YaHei","SimSun",serif}}
+    #think-log-table .col-move{{text-align:left;overflow:visible}}
     #status{{margin-top:12px;font-size:13px;min-height:3.5em;white-space:pre-wrap}}
     #ai-thinking{{font-size:12px;color:#7a4b00;min-height:1.6em;margin-top:8px}}
     .input-locked #board{{opacity:.94;pointer-events:none}}
@@ -562,8 +574,21 @@ def _html_page() -> str:
     <div class="layout">
       <div class="think-panel">
         <h2>思考日志</h2>
-        <div class="hint">{BRAND_ZH} 每步决策：深度、耗时、行棋方 vl、棋子与坐标</div>
-        <div id="think-log-body"></div>
+        <div class="hint">{BRAND_ZH} 每步决策：深度、耗时、分数（vl）、棋子与坐标</div>
+        <div id="think-log-body">
+          <table id="think-log-table">
+            <thead>
+              <tr>
+                <th class="col-depth">深度</th>
+                <th class="col-ms">耗时</th>
+                <th class="col-vl">分数</th>
+                <th class="col-piece">棋子</th>
+                <th class="col-move">着法</th>
+              </tr>
+            </thead>
+            <tbody id="think-log-tbody"></tbody>
+          </table>
+        </div>
       </div>
       <div class="board-wrap">
         <div class="board-shell">
@@ -613,6 +638,7 @@ def _html_page() -> str:
   const bookPathEl=document.getElementById("book-path"), nnuePathEl=document.getElementById("nnue-path");
   const chkSound=document.getElementById("chk-sound");
   const aiThinkingEl=document.getElementById("ai-thinking"), thinkLogBody=document.getElementById("think-log-body");
+  const thinkLogTbody=document.getElementById("think-log-tbody");
   const dialogOverlay=document.getElementById("dialog-overlay"), dialogTitle=document.getElementById("dialog-title");
   const dialogBody=document.getElementById("dialog-body"), dialogOk=document.getElementById("dialog-ok");
   const toastStack=document.getElementById("toast-stack");
@@ -692,20 +718,57 @@ def _html_page() -> str:
       addSprite("hl",snap.last_move[2],snap.last_move[3],"/static/xqwl/selected.png");
     }}
   }}
+  function formatVlCell(v){{
+    var s=Math.trunc(Number(v)||0);
+    var t=String(s);
+    while(t.length<4)t=" "+t;
+    return t;
+  }}
+  function thinkLogRowKey(e){{
+    if(!e)return "";
+    return [e.iccs||"",e.score||0,e.elapsed_ms||0,e.depth||0,e.from_book?"1":"0"].join("|");
+  }}
   function renderThinkLog(entries){{
-    if(!thinkLogBody)return;
+    if(!thinkLogTbody)return;
     entries=entries||[];
-    var key=entries.length+"|"+(entries.length?entries[entries.length-1].text:"");
+    var last=entries.length?entries[entries.length-1]:null;
+    var key=entries.length+"|"+thinkLogRowKey(last);
     if(key===lastThinkLogKey)return;
     lastThinkLogKey=key;
-    thinkLogBody.replaceChildren();
+    thinkLogTbody.replaceChildren();
     entries.forEach(function(e){{
-      var line=document.createElement("div");
-      line.className="think-line";
-      line.textContent=e.text||"";
-      thinkLogBody.appendChild(line);
+      var tr=document.createElement("tr");
+      if(e.depth!==undefined&&e.depth!==null){{
+        var tdDepth=document.createElement("td");
+        tdDepth.className="col-depth";
+        tdDepth.textContent=e.from_book?"库":String(e.depth);
+        var tdMs=document.createElement("td");
+        tdMs.className="col-ms";
+        tdMs.textContent=String(Math.round(Number(e.elapsed_ms)||0));
+        var tdVl=document.createElement("td");
+        tdVl.className="col-vl";
+        tdVl.textContent=formatVlCell(e.score);
+        var tdPiece=document.createElement("td");
+        tdPiece.className="col-piece";
+        tdPiece.textContent=e.piece||"?";
+        var tdMove=document.createElement("td");
+        tdMove.className="col-move";
+        var x1=e.x1,y1=e.y1,x2=e.x2,y2=e.y2;
+        tdMove.textContent="("+x1+","+y1+") → ("+x2+","+y2+")";
+        tr.appendChild(tdDepth);
+        tr.appendChild(tdMs);
+        tr.appendChild(tdVl);
+        tr.appendChild(tdPiece);
+        tr.appendChild(tdMove);
+      }}else{{
+        var tdFallback=document.createElement("td");
+        tdFallback.colSpan=5;
+        tdFallback.textContent=e.text||"";
+        tr.appendChild(tdFallback);
+      }}
+      thinkLogTbody.appendChild(tr);
     }});
-    thinkLogBody.scrollTop=thinkLogBody.scrollHeight;
+    if(thinkLogBody)thinkLogBody.scrollTop=thinkLogBody.scrollHeight;
   }}
   function setPathEl(el, path, missingText){{
     if(!el)return;
