@@ -29,6 +29,7 @@ _WORKER_DIR_RE = re.compile(r"^worker_(\d+)$")
 class Sample:
     fen: str
     vl: float
+    feat_indices: np.ndarray | None = None
 
 
 def _is_valid_fen(fen: str) -> bool:
@@ -65,6 +66,64 @@ def _resolve_load_workers(load_workers: int) -> int:
     if load_workers <= 0:
         load_workers = os.cpu_count() or 1
     return max(1, load_workers)
+
+
+def resolve_train_workers(num_workers: int, *, use_cuda: bool) -> int:
+    if num_workers > 0:
+        return num_workers
+    if use_cuda:
+        return min(8, os.cpu_count() or 1)
+    return 0
+
+
+def _featurize_sample(sample: Sample) -> Sample:
+    return Sample(
+        fen=sample.fen,
+        vl=sample.vl,
+        feat_indices=fen_to_feature_indices(sample.fen),
+    )
+
+
+def _featurize_chunk(samples: list[Sample]) -> list[Sample]:
+    return [_featurize_sample(sample) for sample in samples]
+
+
+def precompute_features(
+    samples: list[Sample],
+    *,
+    load_workers: int = 0,
+) -> list[Sample]:
+    if not samples or samples[0].feat_indices is not None:
+        return samples
+
+    workers = _resolve_load_workers(load_workers)
+    print(f"[data] precomputing PSQ features for {len(samples):,} samples ...", flush=True)
+
+    if workers <= 1:
+        from tqdm import tqdm
+
+        return [_featurize_sample(sample) for sample in tqdm(samples, desc="features", unit="sample")]
+
+    chunk_size = max(2000, len(samples) // (workers * 8))
+    chunks = [samples[i : i + chunk_size] for i in range(0, len(samples), chunk_size)]
+    print(
+        f"[data] feature precompute: {workers} worker(s), {len(chunks)} chunk(s)",
+        flush=True,
+    )
+
+    result: list[Sample] = []
+    completed = 0
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(_featurize_chunk, chunk) for chunk in chunks]
+        for future in as_completed(futures):
+            result.extend(future.result())
+            completed += 1
+            print(
+                f"[data]   feature chunk {completed}/{len(chunks)} done, "
+                f"{len(result):,}/{len(samples):,} samples",
+                flush=True,
+            )
+    return result
 
 
 def _parse_file_range(path_str: str, start: int, end: int) -> tuple[list[Sample], int, int]:
@@ -367,28 +426,28 @@ class NnueDataset(Dataset):
 
     def __getitem__(self, idx: int) -> tuple[np.ndarray, float, float]:
         s = self.samples[idx]
-        indices = fen_to_feature_indices(s.fen)
+        indices = s.feat_indices if s.feat_indices is not None else fen_to_feature_indices(s.fen)
         target_norm = (s.vl - self.label_mean) / self.label_std
         return indices, target_norm, s.vl
 
 
 def collate_fn(batch: list[tuple[np.ndarray, float, float]]) -> tuple[torch.Tensor, ...]:
-    indices_list: list[int] = []
-    offsets: list[int] = [0]
-    targets_norm: list[float] = []
-    targets_raw: list[float] = []
+    feat_arrays = [feat_indices for feat_indices, _, _ in batch]
+    indices_arr = np.concatenate(feat_arrays) if len(feat_arrays) > 1 else feat_arrays[0]
+    offsets = np.empty(len(batch), dtype=np.int64)
+    offset = 0
+    for i, feat_indices in enumerate(feat_arrays):
+        offsets[i] = offset
+        offset += len(feat_indices)
 
-    for feat_indices, target_norm, raw in batch:
-        indices_list.extend(feat_indices.tolist())
-        offsets.append(offsets[-1] + len(feat_indices))
-        targets_norm.append(target_norm)
-        targets_raw.append(raw)
+    targets_norm = np.array([target_norm for _, target_norm, _ in batch], dtype=np.float32)
+    targets_raw = np.array([raw for _, _, raw in batch], dtype=np.float32)
 
     return (
-        torch.tensor(indices_list, dtype=torch.long),
-        torch.tensor(offsets[:-1], dtype=torch.long),
-        torch.tensor(targets_norm, dtype=torch.float32),
-        torch.tensor(targets_raw, dtype=torch.float32),
+        torch.from_numpy(np.ascontiguousarray(indices_arr, dtype=np.int64)),
+        torch.from_numpy(offsets),
+        torch.from_numpy(targets_norm),
+        torch.from_numpy(targets_raw),
     )
 
 
@@ -407,7 +466,7 @@ def make_dataloader(
         "shuffle": shuffle,
         "num_workers": num_workers,
         "collate_fn": collate_fn,
-        "pin_memory": pin_memory and num_workers > 0,
+        "pin_memory": pin_memory,
     }
     if num_workers > 0:
         kwargs["persistent_workers"] = True

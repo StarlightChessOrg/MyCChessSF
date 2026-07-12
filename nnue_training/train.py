@@ -10,6 +10,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 import yaml
+from tqdm import tqdm
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
@@ -20,6 +21,8 @@ from data.dataset import (
     NnueDataset,
     compute_zscore_stats,
     make_dataloader,
+    precompute_features,
+    resolve_train_workers,
     split_samples,
     split_samples_by_ratio,
 )
@@ -46,6 +49,8 @@ def evaluate(
     *,
     label_mean: float,
     label_std: float,
+    desc: str = "val",
+    use_tqdm: bool = True,
 ) -> dict[str, float]:
     model.eval()
     total_loss = 0.0
@@ -60,11 +65,14 @@ def evaluate(
     sum_true_sq = 0.0
     sum_cross = 0.0
 
-    for indices, offsets, targets_norm, targets_raw in loader:
-        indices = indices.to(device)
-        offsets = offsets.to(device)
-        targets_norm = targets_norm.to(device)
-        targets_raw = targets_raw.to(device)
+    non_blocking = device.type == "cuda"
+    batch_iter = tqdm(loader, desc=desc, unit="batch", leave=False) if use_tqdm else loader
+
+    for indices, offsets, targets_norm, targets_raw in batch_iter:
+        indices = indices.to(device, non_blocking=non_blocking)
+        offsets = offsets.to(device, non_blocking=non_blocking)
+        targets_norm = targets_norm.to(device, non_blocking=non_blocking)
+        targets_raw = targets_raw.to(device, non_blocking=non_blocking)
 
         preds_norm = model(indices, offsets)
         loss = criterion(preds_norm, targets_norm)
@@ -143,18 +151,29 @@ def train_epoch(
     optimizer,
     criterion,
     *,
-    log_every: int,
     epoch: int,
+    max_epochs: int,
+    use_tqdm: bool = True,
 ) -> float:
     model.train()
     total_loss = 0.0
     n = 0
-    t0 = time.time()
+    non_blocking = device.type == "cuda"
+    batch_iter = (
+        tqdm(
+            loader,
+            desc=f"train {epoch}/{max_epochs}",
+            unit="batch",
+            leave=True,
+        )
+        if use_tqdm
+        else loader
+    )
 
-    for step, (indices, offsets, targets_norm, _targets_raw) in enumerate(loader, start=1):
-        indices = indices.to(device)
-        offsets = offsets.to(device)
-        targets_norm = targets_norm.to(device)
+    for indices, offsets, targets_norm, _targets_raw in batch_iter:
+        indices = indices.to(device, non_blocking=non_blocking)
+        offsets = offsets.to(device, non_blocking=non_blocking)
+        targets_norm = targets_norm.to(device, non_blocking=non_blocking)
 
         optimizer.zero_grad(set_to_none=True)
         preds = model(indices, offsets)
@@ -166,10 +185,12 @@ def train_epoch(
         total_loss += loss.item() * bs
         n += bs
 
-        if log_every > 0 and (step == 1 or step % log_every == 0):
-            avg = total_loss / n
-            elapsed = time.time() - t0
-            print(f"  epoch {epoch} step {step}  train_loss={avg:.6f}  ({elapsed:.1f}s)", flush=True)
+        if use_tqdm and isinstance(batch_iter, tqdm):
+            batch_iter.set_postfix(
+                loss=f"{total_loss / n:.6f}",
+                samples=f"{n:,}",
+                refresh=False,
+            )
 
     return total_loss / max(n, 1)
 
@@ -187,6 +208,12 @@ def main() -> None:
     data_source = resolve_path(ROOT, data_cfg["source"])
     ckpt_dir = resolve_path(ROOT, train_cfg.get("checkpoint_dir", "checkpoints"))
     device = torch.device(train_cfg.get("device", "cpu"))
+    use_cuda = device.type == "cuda"
+    if use_cuda:
+        torch.backends.cudnn.benchmark = True
+        if hasattr(torch, "set_float32_matmul_precision"):
+            torch.set_float32_matmul_precision("high")
+        print(f"[device] cuda={torch.cuda.get_device_name(device)}", flush=True)
 
     pattern = data_cfg.get("pattern", DEFAULT_DATA_PATTERN)
     load_workers = int(data_cfg.get("load_workers", 0))
@@ -216,16 +243,27 @@ def main() -> None:
     label_mean, label_std = compute_zscore_stats(train_samples)
     print(f"[label] z-score mean={label_mean:.4f}  std={label_std:.4f}", flush=True)
 
+    precompute = bool(train_cfg.get("precompute_features", use_cuda))
+    feature_workers = int(train_cfg.get("feature_workers", data_cfg.get("load_workers", 0)))
+    if precompute:
+        train_samples = precompute_features(train_samples, load_workers=feature_workers)
+        val_samples = precompute_features(val_samples, load_workers=feature_workers)
+
     train_ds = NnueDataset(train_samples, label_mean=label_mean, label_std=label_std)
     val_ds = NnueDataset(val_samples, label_mean=label_mean, label_std=label_std)
 
-    num_workers = train_cfg.get("num_workers", 0)
-    print(f"[loader] num_workers={num_workers}  batch_size={train_cfg['batch_size']}")
+    num_workers = resolve_train_workers(int(train_cfg.get("num_workers", 0)), use_cuda=use_cuda)
+    batch_size = int(train_cfg["batch_size"])
+    print(
+        f"[loader] num_workers={num_workers}  batch_size={batch_size}  "
+        f"prefetch={train_cfg.get('prefetch_factor', 2)}  pin_memory={use_cuda}",
+        flush=True,
+    )
 
-    use_pin = device.type == "cuda"
+    use_pin = use_cuda
     train_loader = make_dataloader(
         train_ds,
-        batch_size=train_cfg["batch_size"],
+        batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
         prefetch_factor=train_cfg.get("prefetch_factor", 2),
@@ -233,7 +271,7 @@ def main() -> None:
     )
     val_loader = make_dataloader(
         val_ds,
-        batch_size=train_cfg["batch_size"],
+        batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
         prefetch_factor=train_cfg.get("prefetch_factor", 2),
@@ -260,21 +298,22 @@ def main() -> None:
     best_val = math.inf
     max_epochs = int(train_cfg.get("max_epochs", train_cfg.get("epochs", 384)))
     patience = int(train_cfg.get("early_stopping_patience", 32))
-    log_every = train_cfg.get("log_every", 50)
+    use_tqdm = bool(train_cfg.get("tqdm", True))
     epochs_without_improvement = 0
 
-    print(f"[train] max_epochs={max_epochs}  early_stopping_patience={patience}")
+    print(f"[train] max_epochs={max_epochs}  early_stopping_patience={patience}", flush=True)
 
     for epoch in range(1, max_epochs + 1):
-        print(f"\n=== epoch {epoch}/{max_epochs} ===")
+        epoch_t0 = time.time()
         train_loss = train_epoch(
             model,
             train_loader,
             device,
             optimizer,
             criterion,
-            log_every=log_every,
             epoch=epoch,
+            max_epochs=max_epochs,
+            use_tqdm=use_tqdm,
         )
         val_metrics = evaluate(
             model,
@@ -283,14 +322,19 @@ def main() -> None:
             criterion,
             label_mean=label_mean,
             label_std=label_std,
+            desc=f"val {epoch}/{max_epochs}",
+            use_tqdm=use_tqdm,
         )
         val_loss = val_metrics["loss"]
+        epoch_elapsed = time.time() - epoch_t0
 
         print(
-            f"epoch {epoch} done  train_loss={train_loss:.6f}  "
-            f"val_loss={val_loss:.6f}  val_mae_norm={val_metrics['mae_norm']:.6f}  "
+            f"epoch {epoch}/{max_epochs} done ({epoch_elapsed:.1f}s)  "
+            f"train_loss={train_loss:.6f}  val_loss={val_loss:.6f}  "
+            f"val_mae_norm={val_metrics['mae_norm']:.6f}  "
             f"val_rmse_norm={val_metrics['rmse_norm']:.6f}  "
-            f"val_mae_vl={val_metrics['mae_vl']:.2f}  val_corr_vl={val_metrics['corr_vl']:.4f}"
+            f"val_mae_vl={val_metrics['mae_vl']:.2f}  val_corr_vl={val_metrics['corr_vl']:.4f}",
+            flush=True,
         )
 
         save_checkpoint(
