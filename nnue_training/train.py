@@ -197,7 +197,7 @@ def save_checkpoint(
             "label_mean": label_mean,
             "label_std": label_std,
             "config": config,
-            "n_features": model_cfg.get("n_features"),
+            "n_features": getattr(model, "n_features", config.get("model", {}).get("n_features")),
         },
         path,
     )
