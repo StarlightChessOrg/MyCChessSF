@@ -1,4 +1,4 @@
-checkpoint: ../nnue_training/checkpoints/best.pt
+checkpoint: ../nnue_training/checkpoints/full_gpu/best.pt
 data:
   source: ../nnue_data
   pattern: "merged.txt"

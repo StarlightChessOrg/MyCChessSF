@@ -1,8 +1,10 @@
 source_checkpoint: nnue_training/checkpoints/full_gpu/best.pt
 epoch: 22
-val_loss: 0.032020 (quiet, z-score MSE)
+val_loss: 0.003690 (z-score MSE, all samples)
 n_features: 1260 (XQWL-PSQ)
-label_mean: -1.015307
-label_std: 226.658213
-calibration: nnue_data/merged.txt (first 10000 samples)
+label_mean: -5.227320
+label_std: 219.693060
+quantize: FT int8 + FC float32 (bin v3)
+calibration: tmps/calib_50k.txt (50000 samples, seed 42)
+parity_mae_vl: 0.347 (max gate 8.0)
 quantized: 2026-07-12
