@@ -49,7 +49,7 @@ cd .. && PYTHONPATH=. python3 scripts/test_nnue_wsl.py
 
 ## 搜索中的行为
 
-- 加载 NNUE 后，根节点 / QSearch 停着用 `evaluate_vl`（Full）；内部节点用 `evaluate_vl_raw`（Raw）
+- 加载 NNUE 后，搜索各节点均用纯 NNUE 静态分；未加载时用纯 PST（`Evaluate()`）
 - **数据生成**（`xqwl_gen_nnue`）默认从 **`deployment/model/quantized.xqnnue.bin`** 加载（构建时自 `data/nnue_model/` 复制）
 - 空着剪枝仍用 PST 子力（`NullOkay()`）
 - **单视角 FT 累加器**：每步只更新走子后视角；`acc_valid[]` lazy refresh；评估只读 `acc[sdPlayer]`

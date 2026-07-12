@@ -26,12 +26,6 @@ constexpr int kMaxActive = 40;
 constexpr int kMaxL1 = 512;
 constexpr int kMaxDelta = 4;
 
-// Mate / extreme score handling (XQWL centipawn scale).
-constexpr int kMateZonePst = WIN_VALUE - 800;   // PST says winning/losing huge
-constexpr int kNnueHardClamp = 3200;            // compress beyond this
-constexpr int kNnueSoftClamp = 2400;            // typical reliable zone
-constexpr int kTacticalBlendPst = 1500;         // blend when PST is large
-
 inline int coord_xy_iccs(int x, int y) { return (x + 3) + ((y + 3) << 4); }
 inline int iccs_x_from_sq(int sq) { return (sq & 15) - 3; }
 inline int iccs_y_from_sq(int sq) { return (sq >> 4) - 3; }
@@ -425,57 +419,7 @@ struct Runtime {
     return forward_norm_from_acc(tmp, pos.sdPlayer);
   }
 
-  static int compress_extreme_vl(int vl) {
-    if (vl > kNnueHardClamp) {
-      return kNnueHardClamp + (vl - kNnueHardClamp) / 4;
-    }
-    if (vl < -kNnueHardClamp) {
-      return -kNnueHardClamp + (vl + kNnueHardClamp) / 4;
-    }
-    return vl;
-  }
-
-  int finalize_vl(int nnue_vl, const PositionStruct &pos) const {
-    const int pst = pos.Evaluate();
-
-    if (std::abs(pst) >= kMateZonePst) {
-      return pst;
-    }
-
-    int vl = compress_extreme_vl(nnue_vl);
-
-    if (pos.InCheck()) {
-      vl = (vl * 3 + pst) / 4;
-    }
-
-    if (std::abs(pst) >= kTacticalBlendPst && std::abs(pst - vl) > 2000) {
-      vl = (vl + pst * 2) / 3;
-    }
-
-    if (vl > kNnueSoftClamp) {
-      vl = kNnueSoftClamp + (vl - kNnueSoftClamp) * 2 / 3;
-    } else if (vl < -kNnueSoftClamp) {
-      vl = -kNnueSoftClamp + (vl + kNnueSoftClamp) * 2 / 3;
-    }
-
-    return vl;
-  }
-
-  int evaluate_vl(const PositionStruct &pos, SearchState *st) const {
-    if (!loaded) {
-      return 0;
-    }
-    float norm = 0.f;
-    if (st != nullptr && st->ready) {
-      norm = forward_norm_from_acc(*st, pos.sdPlayer);
-    } else {
-      norm = forward_norm_full(pos);
-    }
-    const int raw = static_cast<int>(std::lround(norm * w.label_std + w.label_mean));
-    return finalize_vl(raw, pos);
-  }
-
-  int evaluate_vl_raw(const PositionStruct &pos, SearchState *st) const {
+  int nnue_score_vl(const PositionStruct &pos, SearchState *st) const {
     if (!loaded) {
       return 0;
     }
@@ -487,6 +431,10 @@ struct Runtime {
     }
     return static_cast<int>(std::lround(norm * w.label_std + w.label_mean));
   }
+
+  int evaluate_vl(const PositionStruct &pos, SearchState *st) const { return nnue_score_vl(pos, st); }
+
+  int evaluate_vl_raw(const PositionStruct &pos, SearchState *st) const { return nnue_score_vl(pos, st); }
 
   /** Max |incremental - full| over root and one-ply legal positions (diagnostics). */
   int verify_incremental(const PositionStruct &pos) const {

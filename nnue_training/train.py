@@ -426,7 +426,7 @@ def main() -> None:
         f"loss_exclude={exclude_mate_from_loss}",
         flush=True,
     )
-    print("[label]               inference uses PST in mate zone", flush=True)
+    print("[label]               inference: pure NNUE when loaded, else pure PST", flush=True)
 
     print("[label] computing z-score stats ...", flush=True)
     label_mean, label_std = compute_zscore_stats(

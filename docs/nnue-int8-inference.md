@@ -58,10 +58,9 @@ Python 参考：`QuantizedNNUE.forward_norm_int8()`（`int8_nnue.py`）。
 |------|------|
 | FT 累加器 | int32 列累加，**单视角增量**（每步更新 `acc[1-sdPlayer]`，`acc_valid[]` lazy refresh） |
 | 增量更新 | 搜索 `MakeMove`/`UndoMakeMove` 维护累加器；排序/探测不触发 NNUE |
-| 评估模式 | 内部节点 Raw；根/QSearch Full（含 PST 将杀修正） |
+| 评估 | 加载 NNUE 时纯 NNUE 静态分；未加载时纯 PST，互不混合 |
 | FC | 纯 int8×uint8 点积 + input scale |
 | SIMD | 运行时派发：Scalar / **NEON**（ARM）/ **AVX2** / **AVX512-VNNI**（独立 TU） |
-| 将杀修正 | PST 极大时采用 PST；将军/大分歧时与 PST 混合 |
 
 查看当前 SIMD 后端：
 
@@ -80,8 +79,8 @@ engine = xc.Engine()
 engine.load_nnue("nnue_qINT8/output/quantized.xqnnue.bin")
 
 pos = xc.Position()
-engine.evaluate_nnue(pos)       # 含将杀修正，搜索用
-engine.evaluate_nnue_raw(pos)   # 纯 NNUE 输出
+engine.evaluate_nnue(pos)       # 纯 NNUE 静态分（与 evaluate_nnue_raw 相同）
+engine.evaluate_nnue_raw(pos)   # 纯 NNUE 静态分
 engine.verify_nnue_incremental(pos)  # 增量 vs 全量，应返回 0
 
 engine.clear_nnue()

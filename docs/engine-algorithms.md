@@ -12,8 +12,8 @@
                             │ 静态评估
               ┌─────────────┴─────────────┐
               ▼                           ▼
-     NNUE evaluate_vl / raw        PST Evaluate()
-     (INT8 增量 + 将杀修正)          (空着剪枝 / 将杀区兜底)
+     NNUE evaluate_vl           PST Evaluate()
+     (INT8 增量)                 (动态 PST，无 NNUE 时)
               │
               ▼
      XQWL-PSQ 1260 维稀疏特征
@@ -97,20 +97,9 @@
 
 ## 评估与 NNUE 集成
 
-### 双模式评估
+加载 NNUE 时，搜索全程使用 **纯 NNUE 静态分**（`evaluate_vl` / `nnue_score_vl`）；未加载 NNUE 时使用 **纯 PST**（`Position::Evaluate()`）。二者不混合。
 
-```cpp
-enum class XqwlEvalMode { Raw, Full };
-```
-
-| 模式 | 函数 | 使用场景 |
-|------|------|----------|
-| **Full** | `evaluate_vl` | 根节点、QSearch 停着、ply 上限 |
-| **Raw** | `evaluate_vl_raw` | 内部 `SearchFull` 节点 |
-
-`Full` 在 Raw 基础上做 **将杀区 PST 兜底**、将军/大分歧 PST 混合、极值压缩（`finalize_vl`）。
-
-`XqwlEvalOrTt(ply, ttEval, mode)` 优先使用 TT 中的 `sEval`；未命中再计算并写入 `staticEval[ply]`。
+`XqwlEvalOrTt(ply, ttEval)` 优先使用 TT 中的 `sEval`；未命中再计算并写入 `staticEval[ply]`。
 
 ### 空着剪枝与 NNUE 分离
 
@@ -141,7 +130,7 @@ enum class XqwlEvalMode { Raw, Full };
 | `XqwlSearchMakeMove` | `acc_apply_move` + 棋盘 `MakeMove` |
 | `XqwlSearchUndoMakeMove` | `acc_undo` + `UndoMakeMove` |
 | 排序 / `LegalMove` 探测 | **不**触发 NNUE |
-| 内部节点 eval | Raw + TT `sEval` 缓存 |
+| 节点 eval | 纯 NNUE（或纯 PST）+ TT `sEval` 缓存 |
 
 ### SIMD 后端
 
@@ -155,11 +144,10 @@ enum class XqwlEvalMode { Raw, Full };
 
 用途：
 
-1. 无 NNUE 时的评估兜底
-2. NNUE `finalize_vl` 的将杀/将军修正
-3. 空着剪枝子力判断
+1. 无 NNUE 时的 **PST 评估**（`Evaluate()`）
+2. 空着剪枝子力判断（`NullOkay()` / `NullSafe()`）
 
-不随搜索树 `MakeMove` 重复刷新（根 PST 混合一次；树内走子依赖 NNUE 增量）。
+NNUE 加载后搜索评估 **不**读取 PST 分值；PST 与 NNUE 互不混合。
 
 ---
 

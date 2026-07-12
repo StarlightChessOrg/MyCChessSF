@@ -95,7 +95,7 @@ python train.py --config configs/full_gpu.yaml
 | `data.mate_exclude_from_zscore` | `true` | z-score 的 mean/std 不含将杀样本 |
 | `train.mate_exclude_from_loss` | `true` | 训练/验证 loss 与早停仅统计 quiet 样本 |
 
-推理侧：C++ `xqwl_nnue.inc` 在 `|PST| ≥ WIN_VALUE-800` 时直接回退 PST，不依赖 NNUE 输出。
+推理侧：C++ 搜索加载 NNUE 时使用纯 NNUE 静态分，不与 PST 混合；未加载 NNUE 时使用纯 PST。
 
 示例日志片段：
 
