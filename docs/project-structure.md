@@ -29,8 +29,9 @@ MyCChessSF/
 ├── nnue_data/                    xqwl_gen_nnue 输出（FEN\tvl，通常不入库）
 ├── nnue_training/                浮点 NNUE PyTorch 训练
 ├── nnue_qINT8/                   INT8 量化 + .xqnnue.bin 导出
-├── third_party/                  外部参考（如 Pikafish），调研用，不参与编译
-│   └── Pikafish/                 中国象棋 NNUE/搜索参考实现（只读）
+├── third_party/                  外部参考 git submodule，调研用，不参与编译
+│   ├── README.md                 子模块说明与更新命令
+│   └── Pikafish/                 → official-pikafish/Pikafish
 ├── tmps/                         本地临时 checkpoint，*.pt 不入库
 ├── scripts/                      构建、打包、测试脚本
 │   ├── build_linux.sh            一键编译 + 打包 deployment/
@@ -62,7 +63,7 @@ MyCChessSF/
 
 | 目录 | 说明 |
 |------|------|
-| `third_party/` | 外部参考源码 vendored 进仓库，当前含 [Pikafish](nnue_pikafish_research.md)（`third_party/Pikafish/`）。仅供 NNUE 特征、搜索剪枝等**调研对照**，CMake **不**编译、链接其中任何代码 |
+| `third_party/` | [Pikafish](https://github.com/official-pikafish/Pikafish) **git submodule**（`third_party/Pikafish`）。仅供 NNUE 特征、搜索剪枝等**调研对照**，CMake **不**编译、链接其中任何代码。克隆后需 `git submodule update --init`；说明见 [third_party/README.md](../third_party/README.md) |
 | `tmps/` | 开发者本地 scratch。可将 `best.pt` 等 checkpoint 复制到此，跑 `nnue_qINT8/quantize.py` 或推理冒烟；`*.pt` 已在 `.gitignore`，不入库。说明见 `tmps/README.md` |
 | `deployment/` | `bash scripts/build_linux.sh` 生成的**可部署目录**（`lib/`、`bin/`、`db/`、`model/`）。已在 `.gitignore`；[GitHub Releases](https://github.com/StarlightChessOrg/MyCChessSF/releases/latest) 上的 tar 包即此目录的打包 |
 | `dist/` | `bash scripts/make_release.sh <版本>` 输出的 `MyCChessSF-v*-linux-x86_64-py*.tar.gz` 及 `.sha256`。已在 `.gitignore` |

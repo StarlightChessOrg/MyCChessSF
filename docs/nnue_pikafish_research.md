@@ -1,7 +1,8 @@
 # Pikafish NNUE 架构调研与 MyCChessSF 训练建议
 
 > 调研日期：2026-07-11  
-> 主要参考：[official-pikafish/Pikafish](https://github.com/official-pikafish/Pikafish) `master` 分支源码、`nnue-pytorch` 文档、Pikafish Wiki。
+> 源码位于 **`third_party/Pikafish`**（[official-pikafish/Pikafish](https://github.com/official-pikafish/Pikafish) git submodule；克隆后 `git submodule update --init --recursive`）。  
+> 主要参考：`master` 分支源码、`nnue-pytorch` 文档、Pikafish Wiki。
 
 ## 1. 背景与目标
 

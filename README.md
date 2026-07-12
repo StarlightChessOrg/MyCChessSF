@@ -9,11 +9,13 @@
 ## 快速开始
 
 ```bash
-git clone https://github.com/StarlightChessOrg/MyCChessSF.git
+git clone --recurse-submodules https://github.com/StarlightChessOrg/MyCChessSF.git
 cd MyCChessSF
 bash scripts/build_linux.sh
 mycchess-play-web --port 5151
 ```
+
+若已克隆但未拉子模块：`git submodule update --init --recursive`。
 
 详细步骤见 [docs/getting-started.md](docs/getting-started.md)。
 
@@ -61,7 +63,7 @@ mycchess-play-web --port 5151
 
 | 目录 | 说明 |
 |------|------|
-| `third_party/` | 外部参考源码（如 [Pikafish](third_party/Pikafish/)），仅供 NNUE/搜索调研阅读，**不参与本引擎编译** |
+| `third_party/` | 外部参考 **git submodule**（[Pikafish](https://github.com/official-pikafish/Pikafish)），仅供 NNUE/搜索调研阅读，**不参与本引擎编译**；见 `third_party/README.md` |
 | `tmps/` | 本地临时目录，可放量化/推理冒烟测试用的 checkpoint（`*.pt` 已 gitignore，不入库） |
 | `deployment/` | `build_linux.sh` 生成的可部署目录（gitignore，Release 包即其 tar 打包） |
 | `dist/` | `make_release.sh` 产出的发布压缩包（gitignore） |

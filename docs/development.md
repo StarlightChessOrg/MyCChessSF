@@ -8,6 +8,7 @@
 | 界面资源 | xqbase/xqwlight Win32/RES（GPL） |
 | 规则抽取 | MyCChessRL `xqwl_extract.inc` 同源思路 |
 | NNUE | XQWL-PSQ 动态特征（1260 维） |
+| Pikafish 参考 | `third_party/Pikafish` git submodule（[official-pikafish/Pikafish](https://github.com/official-pikafish/Pikafish)），调研用 |
 
 ## 许可证
 

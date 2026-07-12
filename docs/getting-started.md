@@ -23,9 +23,15 @@ pip install -r nnue_qINT8/requirements.txt
 ## 一键编译
 
 ```bash
-git clone https://github.com/StarlightChessOrg/MyCChessSF.git
+git clone --recurse-submodules https://github.com/StarlightChessOrg/MyCChessSF.git
 cd MyCChessSF
 bash scripts/build_linux.sh
+```
+
+已克隆但未初始化子模块时：
+
+```bash
+git submodule update --init --recursive
 ```
 
 编译完成后，仓库根目录会出现：
