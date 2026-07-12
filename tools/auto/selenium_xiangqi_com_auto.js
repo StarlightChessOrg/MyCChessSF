@@ -255,12 +255,12 @@ async function findGridSquare(driver, row, col, preferPiece = true) {
   const variants = []
   if (row === 1) {
     if (preferPiece) variants.push(`${rowSel} div.square-has-piece`)
-    variants.push(`${rowSel} > div:last-child`, `${rowSel} > div`)
+    variants.push(`${rowSel} div.square`, `${rowSel} > div:last-child`, `${rowSel} > div`)
   } else if (row === 10) {
     if (preferPiece) variants.push(`${rowSel} div.square-has-piece`)
-    variants.push(`${rowSel} > div:first-child`, `${rowSel} > div`)
+    variants.push(`${rowSel} div.square`, `${rowSel} > div:first-child`, `${rowSel} > div`)
   } else {
-    if (preferPiece) variants.push(`${rowSel} div.square-has-piece`)
+    if (preferPiece) variants.push(`${rowSel} div.square-has-piece`, `${rowSel} div.square`)
     variants.push(`${rowSel} > div`, `${rowSel} div`)
   }
   for (const sel of variants) {
@@ -272,6 +272,76 @@ async function findGridSquare(driver, row, col, preferPiece = true) {
     }
   }
   throw new Error(`找不到格子 row=${row} col=${col}`)
+}
+
+async function focusGameWindow(driver) {
+  await driver.executeScript("window.focus();")
+  try {
+    const board = await driver.findElement(By.css("#game-grid"))
+    await board.click()
+  } catch {
+    /* optional focus target */
+  }
+  await sleep(200)
+}
+
+async function listPiecesDebug(driver) {
+  try {
+    return await driver.executeScript(() => {
+      const out = []
+      document.querySelectorAll(".pieces-container [r]").forEach((el) => {
+        out.push({
+          r: el.getAttribute("r"),
+          c: el.getAttribute("c"),
+          f: el.getAttribute("f"),
+          cls: el.className,
+        })
+      })
+      return out.slice(0, 40)
+    })
+  } catch {
+    return []
+  }
+}
+
+async function findPieceAtGrid(driver, gridRow, gridCol) {
+  const pieces = await driver.findElements(By.css(".pieces-container [r]"))
+  for (const el of pieces) {
+    const r = Number(await el.getAttribute("r"))
+    if (!Number.isFinite(r)) continue
+    const row = 11 - r
+    const cAttr = await el.getAttribute("c")
+    const fAttr = await el.getAttribute("f")
+    const colCandidates = [Number(cAttr), Number(fAttr), Number(cAttr) + 1, Number(fAttr) + 1].filter(
+      Number.isFinite
+    )
+    for (const col of colCandidates) {
+      if (row === gridRow && col === gridCol) {
+        console.log(`[auto] 棋子 grid (${gridRow},${gridCol}) r=${r} c=${col}`)
+        return el
+      }
+    }
+  }
+  return null
+}
+
+async function performMoveDrag(driver, start, end) {
+  for (const el of [start, end]) {
+    await driver.executeScript(
+      "arguments[0].scrollIntoView({block:'center',inline:'center'});",
+      el
+    )
+  }
+  await sleep(150)
+  await driver
+    .actions()
+    .move({ origin: start, x: 0, y: 0 })
+    .press()
+    .pause(300)
+    .move({ origin: end, x: 0, y: 0 })
+    .pause(200)
+    .release()
+    .perform()
 }
 
 async function performMoveClick(driver, start, end) {
@@ -357,10 +427,34 @@ async function findPieceAtSite(driver, r, c) {
 
 async function findMoveTarget(driver, site, preferPiece) {
   if (preferPiece) {
-    const piece = await findPieceAtSite(driver, site.r, site.c)
-    if (piece) return piece
+    const byRc = await findPieceAtSite(driver, site.r, site.c)
+    if (byRc) return byRc
+    const byGrid = await findPieceAtGrid(driver, site.gridRow, site.gridCol)
+    if (byGrid) return byGrid
   }
   return findGridSquare(driver, site.gridRow, site.gridCol, preferPiece)
+}
+
+async function waitForBoardDiff(driver, beforeBoard, timeoutMs = 4000) {
+  const since = beforeBoard.toString()
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const cur = await readWebBoard(driver)
+    if (cur.toString() !== since) return cur
+    await sleep(200)
+  }
+  return readWebBoard(driver)
+}
+
+async function applyMoveOnPage(driver, start, end, attempt) {
+  await focusGameWindow(driver)
+  if (attempt % 2 === 0) {
+    console.log("[auto] 走子方式: 拖拽")
+    await performMoveDrag(driver, start, end)
+  } else {
+    console.log("[auto] 走子方式: 点选")
+    await performMoveClick(driver, start, end)
+  }
 }
 
 async function waitForComputerSetupUi(driver, timeoutMs = 90000) {
@@ -435,6 +529,8 @@ async function openComputerPage(driver) {
   await sleep(400)
   if (!(await clickSideRed(driver))) {
     console.warn("[auto] 未点到 Red，可能默认已是红方")
+  } else {
+    await sleep(400)
   }
 
   await sleep(300)
@@ -443,6 +539,8 @@ async function openComputerPage(driver) {
   }
 
   await waitForBoard(driver)
+  await sleep(1200)
+  await focusGameWindow(driver)
 }
 
 /** 旧版首页入口（回退） */
@@ -463,6 +561,8 @@ async function openLegacyHome(driver) {
   }
   await waitLoading()
   await waitForBoard(driver)
+  await sleep(1200)
+  await focusGameWindow(driver)
 }
 
 async function openXiangqiGame(driver) {
@@ -572,22 +672,23 @@ async function doMoveOnWeb(driver, attempt = 0) {
   await driver.executeScript("arguments[0].style.outline='3px solid orange';", end)
 
   try {
-    await performMoveClick(driver, start, end)
+    await applyMoveOnPage(driver, start, end, attempt)
   } catch (err) {
-    console.warn("[auto] 指针点击失败，尝试 JS click:", err.message || err)
+    console.warn("[auto] 走子交互失败，尝试备用点击:", err.message || err)
     await dispatchPointerClick(driver, start)
-    await sleep(250)
+    await sleep(300)
     await dispatchPointerClick(driver, end)
   }
 
   await driver.executeScript("arguments[0].style.outline='';", start)
   await driver.executeScript("arguments[0].style.outline='';", end)
-  await sleep(600)
 
-  const afterBoard = await readWebBoard(driver)
+  const afterBoard = await waitForBoardDiff(driver, beforeBoard)
   if (afterBoard.toString() === beforeBoard.toString()) {
+    const pieces = await listPiecesDebug(driver)
+    if (pieces.length) console.warn("[auto] 当前棋子样本", JSON.stringify(pieces.slice(0, 8)))
     console.error("[auto] 网页着法失败，重试")
-    await sleep(400)
+    await sleep(500)
     return doMoveOnWeb(driver, attempt + 1)
   }
 
