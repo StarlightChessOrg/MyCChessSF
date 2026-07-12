@@ -44,38 +44,49 @@
 
 ## 输出格式
 
-每行一条样本，制表符分隔：
+数据目录默认 **`nnue_data/`**（仓库根下，gitignore）。常见布局：
+
+- 单文件：`merged.txt`（多批合并）
+- 分块：`worker_{id}/chunk_{n}.txt`（`xqwl_gen_nnue` 默认）
+
+每行一条样本，**制表符分隔**，标准 **4 列**：
 
 ```text
-rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1	7	6	0
+FEN\t搜索分\tPST\tin_check
 ```
 
-| 列 | 含义 |
-|----|------|
-| FEN | 标准象棋 FEN（红方在 FEN 底部，大写为红） |
-| 搜索分 | 根节点搜索分（行棋方视角；`search_best_detail()['score']`） |
-| PST | 同一局面的 PST 静态分（行棋方视角；`Position.evaluate()`） |
-| in_check | 行棋方是否被将军：`0` / `1` |
+| 列 | 名称 | 说明 |
+|----|------|------|
+| 1 | FEN | 局面（含行棋方 `w` / `b`；红在 FEN 底部，大写为红） |
+| 2 | 搜索分 | 根节点搜索标签（行棋方视角；NNUE 拟合目标；与 `search_best_detail()['score']` 一致） |
+| 3 | PST | 同一局面的 PST 静态分（行棋方视角；`Position.evaluate()`） |
+| 4 | in_check | 行棋方是否被将军：`0` 否，`1` 是 |
 
-旧版两列 `FEN\tvl` 仍可读入训练，但 **`quiet_only: true` 时需先补 PST 列**（见下节）。
+示例：
+
+```text
+rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1	8	3	0
+rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C4NC1/9/RNBAKAB1R b - - 0 1	-2	-6	0
+```
+
+训练默认 [`quiet_only: true`](nnue-training.md#静态局面过滤quiet_only)：用第 3/4 列过滤非静态局面（非将杀、未将军、\|搜索分 − PST\| ≤ `quiet_pst_margin`）。
+
+旧版两列 `FEN\tvl` 仍可被加载器读取，但 **`quiet_only: true` 时须先补全第 3/4 列**（见下节）。
 
 ### 为旧数据补充 PST（WSL）
 
-若已有仅含 `FEN\tvl` 的 `merged.txt`（例如在 workspace 根目录），在 WSL 中：
+若已有仅含 `FEN\tvl` 的文件，在 WSL 中：
 
 ```bash
-cd /mnt/c/Users/79315/Desktop/2/MyCChessSF
 bash scripts/build_linux.sh   # 若尚未编译 xqwlight_core
 bash scripts/augment_merged_wsl.sh /path/to/legacy_merged.txt nnue_data/merged.txt
 ```
-
-脚本多进程写入 **`MyCChessSF/nnue_data/merged.txt`**；训练配置 `full_gpu.yaml` 的 `data.source` 指向该目录。
 
 也可直接调用 Python：
 
 ```bash
 python3 scripts/augment_nnue_data_pst.py \
-  --input /mnt/c/Users/79315/Desktop/2/nnue_data/merged.txt \
+  --input /path/to/legacy_merged.txt \
   --output nnue_data/merged.txt \
   --workers auto
 ```

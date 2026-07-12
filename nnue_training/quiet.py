@@ -103,7 +103,7 @@ def _require_metadata_columns(samples: list) -> None:
             f"{missing:,}/{len(samples):,} rows missing PST or in_check. "
             f"Augment legacy files in WSL:\n"
             f"  bash scripts/augment_merged_wsl.sh /path/to/merged.txt nnue_data/merged.txt\n"
-            f"See docs/nnue-data-generation.md and README.md."
+            f"See docs/nnue-data-generation.md#输出格式."
         )
 
 
