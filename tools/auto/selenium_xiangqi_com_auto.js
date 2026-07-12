@@ -134,6 +134,53 @@ async function clickByXPath(driver, xpaths, label) {
   return false
 }
 
+async function waitForComputerSetupUi(driver, timeoutMs = 90000) {
+  console.log("[auto] 等待相弈 React UI（Edge 控制台 SSL 报错多为广告/统计，可忽略）...")
+  await driver.wait(async () => {
+    try {
+      const body = await driver.findElement(By.css("body")).getText()
+      return /Play Computer|Level \d+|(^|\s)Play(\s|$)/i.test(body)
+    } catch {
+      return false
+    }
+  }, timeoutMs, "相弈 computer 页 UI 未在时限内出现")
+  console.log(`[auto] UI 就绪  title=${await driver.getTitle()}  url=${await driver.getCurrentUrl()}`)
+}
+
+async function selectBotLevel(driver, level) {
+  const tag = `(Level ${level})`
+  const botXpaths = [
+    `//*[contains(normalize-space(.),'${tag}') and not(self::script)]`,
+    `//*[contains(@class,'bot') and contains(.,'Level ${level}')]`,
+    `//*[contains(.,'${tag}') and not(self::script)]`,
+  ]
+  if (await clickByXPath(driver, botXpaths, `bot ${tag}`)) return true
+
+  const botLegacy = `.all-bots :nth-child(${level})`
+  if (await clickFirst(driver, [botLegacy], `bot L${level}`)) return true
+
+  console.log(`[auto] 轮播切换到 ${tag} ...`)
+  const nextSelectors = [
+    "button[class*='next' i]",
+    "[class*='carousel'] [class*='next' i]",
+    "[class*='arrow'][class*='right' i]",
+    "[aria-label*='next' i]",
+  ]
+  const nextXpaths = [
+    "//button[contains(@class,'next')]",
+    "//*[contains(@class,'arrow') and contains(@class,'right')]",
+    "//button[contains(@class,'right') and .//*[name()='svg']]",
+  ]
+  for (let i = 0; i < 12; i++) {
+    if (await clickByXPath(driver, botXpaths, `bot ${tag}`)) return true
+    let advanced = await clickFirst(driver, nextSelectors, "bot-next")
+    if (!advanced) advanced = await clickByXPath(driver, nextXpaths, "bot-next")
+    if (!advanced) break
+    await sleep(400)
+  }
+  return false
+}
+
 async function waitForBoard(driver, timeoutMs = 120000) {
   console.log("[auto] 等待棋盘 #game-grid ...")
   await driver.wait(until.elementLocated(By.css("#game-grid")), timeoutMs)
@@ -143,25 +190,17 @@ async function waitForBoard(driver, timeoutMs = 120000) {
 /** 新版 https://play.xiangqi.com/computer */
 async function openComputerPage(driver) {
   console.log(`[auto] 打开 ${XIANGQI_URL}`)
-  await driver.get(XIANGQI_URL)
-  await sleep(1500)
+  try {
+    await driver.get(XIANGQI_URL)
+  } catch (err) {
+    const msg = String(err.message || err)
+    if (!/timeout|timed out/i.test(msg)) throw err
+    console.warn("[auto] 页面加载超时（第三方资源 SSL 失败常见），继续等待 UI ...")
+  }
+  await waitForComputerSetupUi(driver)
 
-  const botLegacy = `.all-bots :nth-child(${OPPONENT_LEVEL})`
-  if (await clickFirst(driver, [botLegacy], `bot L${OPPONENT_LEVEL}`)) {
-    /* legacy list */
-  } else {
-    const levelRe = `Level ${OPPONENT_LEVEL}`
-    const okBot = await clickByXPath(
-      driver,
-      [
-        `//*[contains(@class,'bot') and contains(.,'${levelRe}')]`,
-        `//*[contains(.,'(${levelRe}') or contains(.,'${levelRe}')][not(self::script)]`,
-      ],
-      `bot ${levelRe}`
-    )
-    if (!okBot) {
-      console.warn(`[auto] 未找到等级 ${OPPONENT_LEVEL}，使用页面默认 bot`)
-    }
+  if (!(await selectBotLevel(driver, OPPONENT_LEVEL))) {
+    console.warn(`[auto] 未找到等级 ${OPPONENT_LEVEL}，使用页面默认 bot`)
   }
 
   await sleep(400)
@@ -407,6 +446,7 @@ async function sendOpponentMove(move) {
 async function initDriver() {
   fs.mkdirSync(USER_PROFILE_DIR, { recursive: true })
   const options = new edge.Options()
+  options.setPageLoadStrategy("eager")
   const args = [
     `--user-data-dir=${USER_PROFILE_DIR}`,
     "--log-level=3",
@@ -414,6 +454,7 @@ async function initDriver() {
     "--no-first-run",
     "--no-default-browser-check",
     "--remote-allow-origins=*",
+    "--window-size=1280,900",
   ]
   if (USE_SYSTEM_EDGE_PROFILE) {
     args.push("--profile-directory=Default")
@@ -424,7 +465,9 @@ async function initDriver() {
     console.warn("[auto] 使用系统 Edge Profile；请先关闭所有 Edge 窗口，否则会启动失败")
   }
   try {
-    return await new Builder().forBrowser("MicrosoftEdge").setEdgeOptions(options).build()
+    const driver = await new Builder().forBrowser("MicrosoftEdge").setEdgeOptions(options).build()
+    await driver.manage().setTimeouts({ pageLoad: 45000, script: 30000, implicit: 0 })
+    return driver
   } catch (err) {
     const msg = String(err.message || err)
     if (/DevToolsActivePort|session not created|crashed/i.test(msg)) {

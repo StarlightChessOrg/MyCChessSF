@@ -105,7 +105,8 @@ Python 桥接：`mycchess_sf/xiangqi_auto_bridge.py`
 - **Windows 连不上 :9494**：WSL 桥接时，PowerShell 执行 `wsl hostname -I` 取 IP，设 `$env:BRIDGE_HOST = "<IP>"` 再 `npm start`。
 - **桥接无着法**：确认 `xqwlight_core` 已编译、BOOK/NNUE 路径正确；看 `[bridge] engine ->` 日志。
 - **网页着法失败**：相弈 DOM 变更会导致选择器失效；可设 `XIANGQI_URL=https://play.xiangqi.com/computer`。
-- **Edge 打不开 / DevToolsActivePort / crashed**：默认已用独立 Profile，一般无需设置 `USER_PROFILE_DIR`。若仍失败：关闭所有 Edge 窗口后重试；或在 PowerShell 设 `$env:KILL_EDGE='1'` 再 `npm start`。只有需要复用登录态时才指向系统目录，且必须先关掉 Edge。
+- **Edge 打不开 / DevToolsActivePort / crashed**：默认已用独立 Profile。关闭所有 Edge 后重试，或 `$env:KILL_EDGE='1'; npm start`。
+- **Edge 控制台 SSL handshake failed**：多为 Google Analytics / CDN 等第三方资源在国内连不上，**一般不影响**相弈主站。脚本已用 `eager` 加载策略，不等待这些资源。若卡在「打开 url」后无 `[auto] UI 就绪`，等 1–2 分钟或检查网络/代理。
 
 诊断脚本（WSL/Linux）：
 
