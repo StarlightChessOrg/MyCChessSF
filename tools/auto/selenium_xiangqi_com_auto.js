@@ -134,6 +134,92 @@ async function clickByXPath(driver, xpaths, label) {
   return false
 }
 
+async function clickSideRed(driver) {
+  return (
+    (await clickByXPath(
+      driver,
+      [
+        "//*[normalize-space(text())='Red']/ancestor-or-self::button[1]",
+        "//*[normalize-space(text())='Red']/ancestor-or-self::*[@role='button'][1]",
+        "//*[contains(@class,'side') and .//*[normalize-space(text())='Red']]",
+        "//button[contains(.,'Red')]",
+        "//*[self::button or self::div][normalize-space(text())='Red']",
+      ],
+      "执红"
+    )) ||
+    (await clickFirst(
+      driver,
+      ["[class*='side' i] [class*='red' i]", "[data-side='red']"],
+      "执红"
+    ))
+  )
+}
+
+async function clickStartPlay(driver) {
+  return (
+    (await clickByXPath(
+      driver,
+      [
+        "//*[normalize-space(text())='Play' and not(starts-with(normalize-space(.),'Play Computer'))]",
+        "//button[contains(.,'Play')]",
+        "//*[self::button or self::div or self::span][normalize-space(text())='Play']",
+      ],
+      "开始对局"
+    )) ||
+    (await clickFirst(
+      driver,
+      [
+        ".button-wrapper button:nth-child(1)",
+        "button[class*='play' i]",
+        "[class*='play-button' i]",
+      ],
+      "开始对局"
+    ))
+  )
+}
+
+async function syncWebBoardFromPage(driver) {
+  webLastBoard = await getWebBoard(driver)
+  console.log("[auto] 已从网页同步棋盘状态")
+}
+
+async function findGridSquare(driver, row, col, preferPiece = true) {
+  const rowSel = `#game-grid > div:nth-child(${row}) > div:nth-child(${col})`
+  const variants = []
+  if (row === 1) {
+    if (preferPiece) variants.push(`${rowSel} div.square-has-piece`)
+    variants.push(`${rowSel} > div:last-child`, `${rowSel} > div`)
+  } else if (row === 10) {
+    if (preferPiece) variants.push(`${rowSel} div.square-has-piece`)
+    variants.push(`${rowSel} > div:first-child`, `${rowSel} > div`)
+  } else {
+    if (preferPiece) variants.push(`${rowSel} div.square-has-piece`)
+    variants.push(`${rowSel} > div`, `${rowSel} div`)
+  }
+  for (const sel of variants) {
+    try {
+      const el = await driver.findElement(By.css(sel))
+      if (await el.isDisplayed()) return el
+    } catch {
+      /* try next */
+    }
+  }
+  throw new Error(`找不到格子 row=${row} col=${col}`)
+}
+
+async function performMoveClick(driver, start, end) {
+  for (const el of [start, end]) {
+    await driver.executeScript(
+      "arguments[0].scrollIntoView({block:'center',inline:'center'});",
+      el
+    )
+  }
+  await sleep(150)
+  await driver.actions().move({ origin: start, x: 0, y: 0 }).click().perform()
+  await sleep(300)
+  await driver.actions().move({ origin: end, x: 0, y: 0 }).click().perform()
+}
+
 async function waitForComputerSetupUi(driver, timeoutMs = 90000) {
   console.log("[auto] 等待相弈 React UI（Edge 控制台 SSL 报错多为广告/统计，可忽略）...")
   await driver.wait(async () => {
@@ -204,30 +290,12 @@ async function openComputerPage(driver) {
   }
 
   await sleep(400)
-  const okRed = await clickByXPath(
-    driver,
-    [
-      "//button[contains(.,'Red')]",
-      "//*[self::button or self::div][normalize-space(text())='Red']",
-      "//label[contains(.,'Red')]",
-    ],
-    "执红"
-  )
-  if (!okRed) {
+  if (!(await clickSideRed(driver))) {
     console.warn("[auto] 未点到 Red，可能默认已是红方")
   }
 
   await sleep(300)
-  const okPlay = await clickByXPath(
-    driver,
-    [
-      "//button[normalize-space()='Play']",
-      "//button[contains(.,'Play')]",
-      ".button-wrapper button:nth-child(1)",
-    ],
-    "开始对局"
-  )
-  if (!okPlay) {
+  if (!(await clickStartPlay(driver))) {
     throw new Error("找不到 Play 按钮；相弈页面 DOM 可能已变更")
   }
 
@@ -261,6 +329,7 @@ async function openXiangqiGame(driver) {
     console.warn("[auto] /computer 流程失败:", err.message || err)
     await openLegacyHome(driver)
   }
+  await syncWebBoardFromPage(driver)
 }
 
 async function isEndGame(driver) {
@@ -286,7 +355,12 @@ async function getEngineMove(driver) {
   if (data !== engineLastMove && data.length === 4 && data !== "0000") {
     console.log("[auto] 引擎着法", data)
     engineLastMove = data
-    await doMoveOnWeb(driver)
+    try {
+      await doMoveOnWeb(driver)
+    } catch (err) {
+      console.error("[auto] 网页走子放弃:", err.message || err)
+      return
+    }
 
     const waitBoardChange = async () => {
       const currentBoard = await getWebBoard(driver)
@@ -308,7 +382,8 @@ async function getEngineMove(driver) {
   }
 }
 
-async function doMoveOnWeb(driver) {
+async function doMoveOnWeb(driver, attempt = 0) {
+  const MAX_ATTEMPTS = 8
   const x1 = Number(engineLastMove.charAt(1))
   const y1 = Number(engineLastMove.charAt(0))
   const x2 = Number(engineLastMove.charAt(3))
@@ -318,58 +393,52 @@ async function doMoveOnWeb(driver) {
   const _x2 = 10 - x2
   const _y2 = y2 + 1
 
+  console.log(
+    `[auto] 网页走子 grid (${_x1},${_y1})->(${_x2},${_y2}) bridge=${engineLastMove} attempt=${attempt + 1}`
+  )
+
+  if (attempt >= MAX_ATTEMPTS) {
+    throw new Error(`网页走子失败已达 ${MAX_ATTEMPTS} 次: ${engineLastMove}`)
+  }
+
   webLastBoard[9 - x1][y1] = 0
   webLastBoard[9 - x2][y2] = 1
 
-  let start = await driver.findElement(
-    By.css(`#game-grid > div:nth-child(${_x1}) > div:nth-child(${_y1}) > div`)
-  )
-  let end = await driver.findElement(
-    By.css(`#game-grid > div:nth-child(${_x2}) > div:nth-child(${_y2}) > div`)
-  )
-  if (_x1 === 1)
-    start = await driver.findElement(
-      By.css(`#game-grid > div:nth-child(${_x1}) > div:nth-child(${_y1}) > div:last-child`)
-    )
-  if (_x2 === 1)
-    end = await driver.findElement(
-      By.css(`#game-grid > div:nth-child(${_x2}) > div:nth-child(${_y2}) > div:last-child`)
-    )
-  if (_x1 === 10)
-    start = await driver.findElement(
-      By.css(`#game-grid > div:nth-child(${_x1}) > div:nth-child(${_y1}) > div:first-child`)
-    )
-  if (_x2 === 10)
-    end = await driver.findElement(
-      By.css(`#game-grid > div:nth-child(${_x2}) > div:nth-child(${_y2}) > div:first-child`)
-    )
+  let start
+  let end
+  try {
+    start = await findGridSquare(driver, _x1, _y1, true)
+    end = await findGridSquare(driver, _x2, _y2, false)
+  } catch (err) {
+    webLastBoard[9 - x1][y1] = 1
+    webLastBoard[9 - x2][y2] = 0
+    console.error("[auto] 定位格子失败:", err.message || err)
+    await sleep(500)
+    return doMoveOnWeb(driver, attempt + 1)
+  }
 
   await driver.executeScript("arguments[0].style.border='3px solid red';", start)
   await driver.executeScript("arguments[0].style.border='3px solid red';", end)
 
-  const startRect = await start.getRect()
-  const endRect = await end.getRect()
-  const startX = Math.ceil(startRect.x + startRect.width / 2)
-  const startY = Math.ceil(startRect.y + startRect.height / 2)
-  const endX = Math.ceil(endRect.x + endRect.width / 2)
-  const endY = Math.ceil(endRect.y + endRect.height / 2)
-  await driver
-    .actions({ bridge: true })
-    .move({ x: startX, y: startY })
-    .click()
-    .move({ x: endX, y: endY, duration: 300 })
-    .click()
-    .perform()
+  try {
+    await performMoveClick(driver, start, end)
+  } catch (err) {
+    console.warn("[auto] 元素点击失败，尝试 JS click:", err.message || err)
+    await driver.executeScript("arguments[0].click();", start)
+    await sleep(250)
+    await driver.executeScript("arguments[0].click();", end)
+  }
 
   await driver.executeScript("arguments[0].style.border='';", start)
   await driver.executeScript("arguments[0].style.border='';", end)
+  await sleep(300)
 
   if ((await getWebBoard(driver)).toString() !== webLastBoard.toString()) {
     webLastBoard[9 - x1][y1] = 1
     webLastBoard[9 - x2][y2] = 0
     console.error("[auto] 网页着法失败，重试")
     await sleep(400)
-    await doMoveOnWeb(driver)
+    return doMoveOnWeb(driver, attempt + 1)
   }
 }
 
