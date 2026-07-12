@@ -274,22 +274,27 @@ struct XQWLEngine {
 
   int evaluate_static(const XQWLPosition &position) const { return position.board.Evaluate(); }
 
+  static XqwlSearchOutcome search_copy(PositionStruct work, XqwlSearchTables &tab, int time_ms, bool use_book) {
+    py::gil_scoped_release release;
+    return XqwlSearchBestMoveEx(work, tab, time_ms, use_book);
+  }
+
   std::string search_best_iccs(const XQWLPosition &position, int time_ms = 1000, bool use_book = true) {
     PositionStruct work = position.board;
-    const int mv = XqwlSearchBestMoveEx(work, tab, time_ms, use_book).mv;
-    if (mv == 0)
+    const XqwlSearchOutcome out = search_copy(std::move(work), tab, time_ms, use_book);
+    if (out.mv == 0)
       return "";
-    return mv_to_iccs(mv);
+    return mv_to_iccs(out.mv);
   }
 
   int search_best_mv(const XQWLPosition &position, int time_ms = 1000, bool use_book = true) {
     PositionStruct work = position.board;
-    return XqwlSearchBestMoveEx(work, tab, time_ms, use_book).mv;
+    return search_copy(std::move(work), tab, time_ms, use_book).mv;
   }
 
   py::dict search_best_detail(const XQWLPosition &position, int time_ms = 1000, bool use_book = true) {
     PositionStruct work = position.board;
-    const XqwlSearchOutcome out = XqwlSearchBestMoveEx(work, tab, time_ms, use_book);
+    const XqwlSearchOutcome out = search_copy(std::move(work), tab, time_ms, use_book);
     py::dict d;
     d["iccs"] = out.mv != 0 ? mv_to_iccs(out.mv) : "";
     d["depth"] = out.depth;

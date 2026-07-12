@@ -35,6 +35,12 @@ class XqwlGameState:
         self.pos.reset()
         self._move_history.clear()
 
+    def set_fen(self, fen: str) -> bool:
+        ok = bool(self.pos.set_fen(fen))
+        if ok:
+            self._move_history.clear()
+        return ok
+
     @property
     def last_move_iccs(self) -> str | None:
         return self._move_history[-1] if self._move_history else None

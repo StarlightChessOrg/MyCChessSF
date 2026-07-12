@@ -96,41 +96,101 @@ class BridgeState:
     def stop(self) -> None:
         self._stop.set()
 
+    def current_fen(self) -> str:
+        return self._game.fen()
+
     def _engine_turn(self) -> bool:
         side = self._game.get_side()
         return (side == "red") == self._engine_red
 
-    def _search_engine_move(self) -> None:
-        pos = self._game.raw_position()
-        detail = self._engine.search_best_detail(pos, self._think_ms, self._use_book)
+    def reset_session(self) -> None:
+        with self._lock:
+            self._game.reset()
+            self.computer_move = "null"
+            self._last_opponent_token = ""
+            self._pending_opponent = None
+        print("[bridge] reset -> new game", flush=True)
+
+    def sync_fen(self, fen: str) -> None:
+        """以网页 FEN 为唯一局面来源；轮到引擎时搜索并更新 computer_move。"""
+        fen = fen.strip()
+        with self._lock:
+            if not self._game.set_fen(fen):
+                raise ValueError(f"Invalid FEN: {fen!r}")
+            self.computer_move = "null"
+            self._last_opponent_token = ""
+            self._pending_opponent = None
+            engine_turn = self._engine_turn()
+        if engine_turn and self._game.legal_moves_iccs_str():
+            self._run_engine_search(apply_internal=False)
+
+    def _run_engine_search(self, *, apply_internal: bool = True) -> None:
+        with self._lock:
+            if not self._engine_turn() or self.computer_move != "null":
+                return
+            if not self._game.legal_moves_iccs_str():
+                return
+            game_copy = self._game.copy()
+            start_fen = self._game.fen()
+
+        detail = self._engine.search_best_detail(
+            game_copy.raw_position(), self._think_ms, self._use_book
+        )
         iccs = str(detail.get("iccs", "") or "")
         if not iccs:
             return
-        self.computer_move = iccs_to_computer_token(iccs)
-        depth = int(detail.get("depth", 0))
-        score = int(detail.get("score", 0))
-        book = bool(detail.get("from_book", False))
-        tag = "book" if book else f"d{depth}"
-        print(f"[bridge] engine -> {iccs} ({tag}, vl={score})", flush=True)
+
+        with self._lock:
+            if not self._engine_turn() or self.computer_move != "null":
+                return
+            if apply_internal and self._game.fen() != start_fen:
+                return
+            if apply_internal:
+                if not self._game.make_move_iccs(iccs):
+                    print(f"[bridge] engine move failed to apply: {iccs!r}", flush=True)
+                    return
+            self.computer_move = iccs_to_computer_token(iccs)
+            depth = int(detail.get("depth", 0))
+            score = int(detail.get("score", 0))
+            book = bool(detail.get("from_book", False))
+            tag = "book" if book else f"d{depth}"
+            print(f"[bridge] engine -> {iccs} ({tag}, vl={score})", flush=True)
+
+    def _search_engine_move(self) -> None:
+        self._run_engine_search(apply_internal=True)
 
     def _apply_opponent_token(self, token: str) -> None:
+        """Legacy Chess98 着法 token；新流程请用 sync_fen。"""
         iccs = bridge4_to_iccs(token)
         legal = set(self._game.legal_moves_iccs_str())
         if iccs not in legal:
-            raise ValueError(f"Illegal opponent move {token!r} -> {iccs!r}")
+            side = self._game.get_side()
+            ply = self._game.ply_count()
+            sample = ", ".join(sorted(legal)[:12])
+            raise ValueError(
+                f"Illegal opponent move {token!r} -> {iccs!r} "
+                f"(side={side}, ply={ply}; legal sample: {sample})"
+            )
         self._game.make_move_iccs(iccs)
         self.computer_move = "null"
         self._last_opponent_token = token
         print(f"[bridge] opponent -> {iccs}", flush=True)
 
-    def submit_opponent_move(self, token: str) -> None:
+    def submit_opponent_move(self, token: str) -> str | None:
         token = token.strip()
         if not token or token in {"wait", "undo", "____"}:
-            return
+            return None
         with self._lock:
             if token == self._last_opponent_token:
-                return
-            self._pending_opponent = token
+                return None
+            try:
+                self._apply_opponent_token(token)
+                need_search = self._engine_turn() and self.computer_move == "null"
+            except ValueError as exc:
+                return str(exc)
+        if need_search and self._game.legal_moves_iccs_str():
+            self._run_engine_search()
+        return None
 
     def request_undo(self) -> None:
         with self._lock:
@@ -141,19 +201,22 @@ class BridgeState:
                 print("[bridge] undo 2 plies", flush=True)
 
     def loop(self) -> None:
+        """Legacy：仅处理 reset 后首轮搜索；对手着法由 sync_fen 驱动。"""
         while not self._stop.is_set():
+            need_search = False
             with self._lock:
+                if (
+                    self._engine_turn()
+                    and self.computer_move == "null"
+                    and self._game.legal_moves_iccs_str()
+                ):
+                    need_search = True
+            if need_search:
                 try:
-                    pending = self._pending_opponent
-                    if pending is not None:
-                        self._pending_opponent = None
-                        self._apply_opponent_token(pending)
-                    if self._engine_turn() and self.computer_move == "null":
-                        if self._game.legal_moves_iccs_str():
-                            self._search_engine_move()
+                    self._run_engine_search()
                 except Exception as exc:
                     print(f"[bridge] error: {exc}", flush=True)
-            time.sleep(0.05)
+            time.sleep(0.1)
 
 
 class _BridgeHandler(BaseHTTPRequestHandler):
@@ -168,13 +231,17 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def _text(self, code: int, body: str) -> None:
-        data = body.encode("utf-8")
-        self.send_response(code)
-        self._cors()
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            data = body.encode("utf-8")
+            self.send_response(code)
+            self._cors()
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            # Selenium 轮询 /computer 时常提前关闭连接，可忽略
+            return
 
     def do_OPTIONS(self) -> None:  # noqa: N802
         self.send_response(204)
@@ -195,14 +262,35 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             self.state.request_undo()
             self._text(200, "successful\n")
             return
+        if path == "/reset":
+            self.state.reset_session()
+            self._text(200, "successful\n")
+            return
+        if path == "/sync" and "fen" in qs and qs["fen"]:
+            from urllib.parse import unquote_plus
+
+            fen = unquote_plus(qs["fen"][0])
+            try:
+                self.state.sync_fen(fen)
+            except ValueError as exc:
+                self._text(409, f"error: {exc}\n")
+                return
+            self._text(200, self.state.computer_move + "\n")
+            return
+        if path == "/fen":
+            self._text(200, self.state.current_fen() + "\n")
+            return
         if "move" in path or "move" in parsed.query or "playermove" in qs:
             token = ""
             if "playermove" in qs and qs["playermove"]:
                 token = qs["playermove"][0]
             elif parsed.query:
                 token = parsed.query.split("=", 1)[-1]
-            self.state.submit_opponent_move(token)
-            self._text(200, "successful\n")
+            err = self.state.submit_opponent_move(token)
+            if err:
+                self._text(409, f"error: {err}\n")
+                return
+            self._text(200, self.state.computer_move + "\n")
             return
         self._text(404, "not found\n")
 

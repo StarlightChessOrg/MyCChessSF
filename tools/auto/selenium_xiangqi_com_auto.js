@@ -4,7 +4,8 @@
  * 依赖象眸 SF 桥接服务（Chess98 兼容 HTTP :9494）：
  *   mycchess-xiangqi-bridge --think-ms 1000
  *
- * **桥接不会打开浏览器**；本脚本 (Windows + Edge) 负责网页自动化。
+ * 局面来源：localStorage['xiangqi.botGameState']（网页人机局权威状态，含 currentFen / moves[].uci）
+ * 不再从 DOM 格子 diff 猜测对手着法。
  *
  * 环境变量（可选）：
  *   XIANGQI_URL         默认 https://play.xiangqi.com/computer
@@ -33,15 +34,160 @@ const USE_SYSTEM_EDGE_PROFILE =
   process.env.USER_PROFILE_DIR &&
   /[\\/]Microsoft[\\/]Edge[\\/]User Data$/i.test(process.env.USER_PROFILE_DIR)
 const KILL_EDGE = process.env.KILL_EDGE === "1"
+const HTTP_TIMEOUT_MS = Number(process.env.BRIDGE_HTTP_TIMEOUT || 15000)
 
 const { Builder, By, until } = require("selenium-webdriver")
 const edge = require("selenium-webdriver/edge")
 const http = require("http")
 const { exec } = require("child_process")
+const {
+  readBotGameState,
+  bridgeTokenToUci,
+  uciToSquares,
+  uciToSquareClass,
+} = require("./xiangqi_game_state")
+const { parseBridge4 } = require("./xiangqi_web_fen")
 
 const BRIDGE_BASE = `http://${BRIDGE_HOST}:${BRIDGE_PORT}`
 
-let engineLastMove = "null"
+async function syncBridgeFen(fen) {
+  const body = await httpGet(`/sync?fen=${encodeURIComponent(fen)}`)
+  return body.trim()
+}
+
+async function findSquareByClass(driver, sqClass) {
+  const xp = `//*[@id='game-grid']//*[contains(@class,'square') and contains(concat(' ', normalize-space(@class), ' '), ' ${sqClass} ')]`
+  return driver.findElement(By.xpath(xp))
+}
+
+async function findPieceWrapperAtSquare(driver, sqClass) {
+  const sq = await findSquareByClass(driver, sqClass)
+  const sr = await sq.getRect()
+  const sx = sr.x + sr.width / 2
+  const sy = sr.y + sr.height / 2
+  const wrappers = await driver.findElements(
+    By.css('#game-grid .pieces-container [class*="PieceWrapper"]')
+  )
+  let best = null
+  let bestD = Infinity
+  for (const w of wrappers) {
+    const r = await w.getRect()
+    const d = (r.x + r.width / 2 - sx) ** 2 + (r.y + r.height / 2 - sy) ** 2
+    if (d < bestD) {
+      bestD = d
+      best = w
+    }
+  }
+  if (best && bestD < (sr.width * sr.width) / 2) return best
+  return null
+}
+
+async function playMoveOnWebSquares(driver, token, userSide) {
+  const { x1, y1, x2, y2 } = parseBridge4(token)
+  const uci = bridgeTokenToUci(token)
+  const fromClass = uciToSquareClassFromUci(uci, true, userSide)
+  const toClass = uciToSquareClassFromUci(uci, false, userSide)
+  console.log(
+    `[auto] 网页走子 ICCS (${x1},${y1})->(${x2},${y2}) UCI=${uci} square ${fromClass}->${toClass} bridge=${token}`
+  )
+
+  const fromPiece = await findPieceWrapperAtSquare(driver, fromClass)
+  const toSquare = await findSquareByClass(driver, toClass)
+  if (!fromPiece || !toSquare) {
+    throw new Error(`定位失败 from=${fromClass} to=${toClass}`)
+  }
+
+  await focusGameWindow(driver)
+  const dragEl = fromPiece
+  const fr = await dragEl.getRect()
+  const tr = await toSquare.getRect()
+  const fx = fr.x + fr.width / 2
+  const fy = fr.y + fr.height / 2
+  const tx = tr.x + tr.width / 2
+  const ty = tr.y + tr.height / 2
+
+  await driver.executeScript(
+    `const [dragEl, toSquare, fx, fy, tx, ty] = arguments;
+     const dt = new DataTransfer();
+     try { dt.effectAllowed = 'move'; } catch {}
+     const fire = (el, type, x, y) => {
+       const ev = new DragEvent(type, {
+         bubbles: true, cancelable: true, composed: true, view: window,
+         clientX: x, clientY: y, button: 0, dataTransfer: dt,
+       });
+       try { Object.defineProperty(ev, 'dataTransfer', { value: dt }); } catch {}
+       el.dispatchEvent(ev);
+     };
+     const mouse = (el, type, x, y) => {
+       el.dispatchEvent(new MouseEvent(type, {
+         bubbles: true, cancelable: true, view: window, button: 0, clientX: x, clientY: y,
+       }));
+     };
+     mouse(dragEl, 'mousedown', fx, fy);
+     fire(dragEl, 'dragstart', fx, fy);
+     const dropTarget = document.elementFromPoint(tx, ty) || toSquare;
+     fire(dropTarget, 'dragenter', tx, ty);
+     fire(dropTarget, 'dragover', tx, ty);
+     fire(dropTarget, 'drop', tx, ty);
+     fire(dragEl, 'dragend', tx, ty);
+     mouse(dropTarget, 'mouseup', tx, ty);`,
+    dragEl,
+    toSquare,
+    fx,
+    fy,
+    tx,
+    ty
+  )
+  await sleep(500)
+}
+
+function uciToSquareClassFromUci(uci, isFrom, userSide) {
+  const sq = uciToSquares(uci)
+  if (!sq) throw new Error(`Invalid UCI ${uci}`)
+  const { file, rank } = isFrom ? sq.from : sq.to
+  return uciToSquareClass(file, rank, userSide)
+}
+
+async function botGameLoop(driver) {
+  await isEndGame(driver)
+  const gs = await readBotGameState(driver)
+  if (!gs) return
+
+  const sig = `${gs.fen}|${gs.moveCount}|${gs.uciList.join(",")}`
+  if (lastGameState && lastGameState._sig === sig) return
+
+  if (gs.moveCount === 0 && lastGameState && lastGameState.moveCount > 0) {
+    console.log("[auto] 新对局")
+    await resetBridgeSession()
+  }
+
+  console.log(
+    `[auto] 局面 ply=${gs.moveCount} side=${gs.sideToMove} player=${gs.playerSide} last=${gs.lastUci || "-"}`
+  )
+
+  const moveToken = await syncBridgeFen(gs.fen)
+
+  if (gs.sideToMove === "w" && moveToken && moveToken !== "null" && moveToken !== "____") {
+    const token = moveToken.replace(/\D/g, "").slice(-4)
+    if (token.length === 4 && token !== "0000" && token !== engineLastMove) {
+      console.log("[auto] 引擎着法", token)
+      engineLastMove = token
+      try {
+        await playMoveOnWebSquares(driver, token, gs.playerSide)
+      } catch (err) {
+        console.error("[auto] 网页走子失败:", err.message || err)
+      }
+    }
+  }
+
+  gs._sig = sig
+  lastGameState = gs
+  state++
+  console.log("==========================")
+}
+
+let lastGameState = null
+let engineLastMove = "0000"
 let webLastBoard = [
   [1, 1, 1, 1, 1, 1, 1, 1, 1],
   [0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -56,7 +202,7 @@ let webLastBoard = [
 ]
 let state = 0
 
-function httpGet(path) {
+function httpGet(path, timeoutMs = HTTP_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const req = http.get(`${BRIDGE_BASE}${path}`, (res) => {
       let data = ""
@@ -66,10 +212,27 @@ function httpGet(path) {
       res.on("end", () => resolve(data.trim()))
     })
     req.on("error", reject)
-    req.setTimeout(5000, () => {
+    req.setTimeout(timeoutMs, () => {
       req.destroy(new Error(`timeout GET ${path}`))
     })
   })
+}
+
+async function httpGetRetry(path, { retries = 3, timeoutMs = HTTP_TIMEOUT_MS } = {}) {
+  let lastErr = null
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await httpGet(path, timeoutMs)
+    } catch (err) {
+      lastErr = err
+      const msg = String(err.message || err)
+      if (!/timeout|ECONNREFUSED|ECONNRESET|socket hang up/i.test(msg)) {
+        throw err
+      }
+      await sleep(400 * (i + 1))
+    }
+  }
+  throw lastErr
 }
 
 function httpNotify(path) {
@@ -80,7 +243,7 @@ function httpNotify(path) {
         res.on("end", resolve)
       })
       .on("error", reject)
-    req.setTimeout(5000, () => {
+    req.setTimeout(HTTP_TIMEOUT_MS, () => {
       req.destroy(new Error(`timeout notify ${path}`))
     })
     req.end()
@@ -92,6 +255,11 @@ async function pingBridge() {
   try {
     const raw = await httpGet("/computer")
     console.log(`[auto] 桥接 OK  /computer -> '${raw}'`)
+    if (raw !== "null" && raw !== "____" && /\d{4}/.test(raw)) {
+      console.warn(
+        "[auto] 桥接含上一局着法，将在网页开局后调用 /reset 同步"
+      )
+    }
     return true
   } catch (err) {
     console.error("[auto] 无法连接象眸桥接服务:", err.message || err)
@@ -248,12 +416,27 @@ async function waitForStableOpponentBoard(driver, sinceBoard, timeoutMs = 45000)
   throw new Error("等待相弈应手超时")
 }
 
+async function resetBridgeSession() {
+  console.log("[auto] 重置桥接局面（新对局）...")
+  await httpNotify("/reset")
+  engineLastMove = "0000"
+  lastGameState = null
+  await sleep(400)
+}
+
 async function waitForBridgeEngineMove(prevToken, timeoutMs = 90000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    const raw = (await httpGet("/computer")).trim()
+    let raw
+    try {
+      raw = (await httpGetRetry("/computer", { retries: 2 })).trim()
+    } catch (err) {
+      console.warn("[auto] 桥接轮询失败，继续重试:", err.message || err)
+      await sleep(1000)
+      continue
+    }
     if (raw === "null" || raw === "____") {
-      await sleep(300)
+      await sleep(400)
       continue
     }
     const digits = raw.replace(/\D/g, "")
@@ -262,19 +445,62 @@ async function waitForBridgeEngineMove(prevToken, timeoutMs = 90000) {
       console.log(`[auto] 桥接下一着就绪 -> '${data}'`)
       return data
     }
-    await sleep(300)
+    await sleep(400)
   }
   console.warn("[auto] 桥接下一着等待超时，继续轮询")
 }
 
-async function resolveOpponentMove(driver, before, after) {
-  const move = await getWebMove(driver, before, after)
-  if (isValidMove(move)) {
+async function resolveOpponentMove(driver, before, after, pieceBefore, pieceAfter) {
+  const boardMove = parseMoveFromBoardDiff(before, after)
+  if (boardMove && !boardMove.capture && isValidMove(boardMove)) {
     console.log(
-      `[auto] 解着 ICCS ${moveToIccsLabel(move)}  bridge ${moveToBridgeToken(move)}`
+      `[auto] 解着(盘差) ICCS ${moveToIccsLabel(boardMove)} bridge ${moveToBridgeToken(boardMove)}`
     )
-    return move
+    return boardMove
   }
+
+  const pieceMove = inferMoveFromPieceGrids(pieceBefore, pieceAfter)
+  if (isValidMove(pieceMove)) {
+    console.log(
+      `[auto] 解着(棋子) ICCS ${moveToIccsLabel(pieceMove)} bridge ${moveToBridgeToken(pieceMove)}`
+    )
+    return pieceMove
+  }
+
+  if (boardMove && boardMove.capture) {
+    const destFromPieces = inferMoveFromPieceGrids(pieceBefore, pieceAfter)
+    if (isValidMove(destFromPieces)) {
+      console.log(
+        `[auto] 解着(吃子) ICCS ${moveToIccsLabel(destFromPieces)} bridge ${moveToBridgeToken(destFromPieces)}`
+      )
+      return destFromPieces
+    }
+  }
+
+  const dom = await readLastMoveFromDOM(driver)
+  if (dom && dom.from && dom.to) {
+    const move = {
+      x1: dom.from.row,
+      y1: dom.from.col,
+      x2: dom.to.row,
+      y2: dom.to.col,
+    }
+    if (isValidMove(move)) {
+      console.log(
+        `[auto] 解着(DOM) ICCS ${moveToIccsLabel(move)} bridge ${moveToBridgeToken(move)}`
+      )
+      return move
+    }
+  }
+
+  const legacy = await getWebMoveLegacy(driver, before, after, boardMove)
+  if (isValidMove(legacy)) {
+    console.log(
+      `[auto] 解着 ICCS ${moveToIccsLabel(legacy)} bridge ${moveToBridgeToken(legacy)}`
+    )
+    return legacy
+  }
+
   return null
 }
 
@@ -351,6 +577,149 @@ function countOccupied(board) {
   let n = 0
   for (const row of board) for (const v of row) if (v === 1) n++
   return n
+}
+
+async function snapshotPieceGrid(driver) {
+  let metrics
+  try {
+    metrics = await getGridMetrics(driver)
+  } catch {
+    return []
+  }
+  const elements = await driver.findElements(By.css(".pieces-container [r]"))
+  const cells = []
+  for (const el of elements) {
+    const { row, col } = await rectToGridCell(driver, el, metrics)
+    cells.push([row - 1, col - 1])
+  }
+  cells.sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  return cells
+}
+
+function pickClosest(fromList, toList) {
+  if (fromList.length === 0 || toList.length === 0) return null
+  let bestFrom = fromList[0]
+  let bestTo = toList[0]
+  let bestDist = Infinity
+  for (const [fx, fy] of fromList) {
+    for (const [tx, ty] of toList) {
+      const d = Math.abs(fx - tx) + Math.abs(fy - ty)
+      if (d > 0 && d < bestDist) {
+        bestDist = d
+        bestFrom = [fx, fy]
+        bestTo = [tx, ty]
+      }
+    }
+  }
+  if (bestDist === Infinity) return null
+  return { x1: bestFrom[0], y1: bestFrom[1], x2: bestTo[0], y2: bestTo[1] }
+}
+
+function inferMoveFromPieceGrids(pieceBefore, pieceAfter) {
+  const key = (r, c) => `${r},${c}`
+  const toMap = (cells) => {
+    const m = new Map()
+    for (const [r, c] of cells) {
+      const k = key(r, c)
+      m.set(k, (m.get(k) || 0) + 1)
+    }
+    return m
+  }
+  const bMap = toMap(pieceBefore)
+  const aMap = toMap(pieceAfter)
+  const from = []
+  const to = []
+  for (const [k, n] of bMap) {
+    const diff = n - (aMap.get(k) || 0)
+    for (let i = 0; i < diff; i++) from.push(k.split(",").map(Number))
+  }
+  for (const [k, n] of aMap) {
+    const diff = n - (bMap.get(k) || 0)
+    for (let i = 0; i < diff; i++) to.push(k.split(",").map(Number))
+  }
+  if (from.length === 1 && to.length === 1) {
+    return { x1: from[0][0], y1: from[0][1], x2: to[0][0], y2: to[0][1] }
+  }
+  if (from.length >= 1 && to.length >= 1) {
+    return pickClosest(from, to)
+  }
+  // 吃子：仅起点变空，终点仍显示有子
+  if (from.length === 1 && to.length === 0 && pieceAfter.length === pieceBefore.length - 1) {
+    const [fx, fy] = from[0]
+    const afterSet = new Set(pieceAfter.map(([r, c]) => key(r, c)))
+    const beforeSet = new Set(pieceBefore.map(([r, c]) => key(r, c)))
+    const added = [...afterSet].filter((k) => !beforeSet.has(k))
+    if (added.length === 1) {
+      const [tr, tc] = added[0].split(",").map(Number)
+      return { x1: fx, y1: fy, x2: tr, y2: tc }
+    }
+    const candidates = pieceAfter.filter(([r, c]) => !(r === fx && c === fy))
+    if (candidates.length === 1) {
+      return { x1: fx, y1: fy, x2: candidates[0][0], y2: candidates[0][1] }
+    }
+    const near = pickClosest(
+      [from[0]],
+      candidates.filter(([r, c]) => Math.abs(r - fx) + Math.abs(c - fy) <= 4)
+    )
+    if (near) return near
+  }
+  return null
+}
+
+function parseMoveFromBoardDiff(lastBoard, currentBoard) {
+  const from = []
+  const to = []
+  for (let i = 0; i < 10; i++) {
+    for (let j = 0; j < 9; j++) {
+      if (lastBoard[i][j] === 1 && currentBoard[i][j] === 0) from.push([i, j])
+      if (lastBoard[i][j] === 0 && currentBoard[i][j] === 1) to.push([i, j])
+    }
+  }
+  if (from.length === 1 && to.length === 1) {
+    return { x1: from[0][0], y1: from[0][1], x2: to[0][0], y2: to[0][1] }
+  }
+  if (from.length >= 1 && to.length >= 1) {
+    return pickClosest(from, to)
+  }
+  if (from.length === 1 && to.length === 0) {
+    return { x1: from[0][0], y1: from[0][1], x2: -1, y2: -1, capture: true }
+  }
+  return null
+}
+
+async function readLastMoveFromDOM(driver) {
+  try {
+    return await driver.executeScript(() => {
+      const out = { from: null, to: null, marks: [] }
+      const grid = document.querySelector("#game-grid")
+      if (!grid) return out
+      for (let ri = 0; ri < grid.children.length; ri++) {
+        const row = grid.children[ri]
+        for (let ci = 0; ci < row.children.length; ci++) {
+          const sq = row.children[ci]
+          const blob =
+            (sq.className || "") +
+            " " +
+            [...sq.querySelectorAll("*")]
+              .slice(0, 12)
+              .map((el) => el.className || "")
+              .join(" ")
+          if (/last.?move|move.?from|move.?to|move.?marker|prev.?move|dest.?square|from.?square|to.?square|moved.?piece|move.?indicator|move.?highlight|last.?from|last.?to/i.test(blob)) {
+            const isFrom = /from|prev|source|start/i.test(blob) && !/to|dest|target/i.test(blob)
+            const isTo = /to|dest|target|moved|end/i.test(blob) && !/from|prev|source/i.test(blob)
+            out.marks.push({ row: ri, col: ci, isFrom, isTo, cls: blob.slice(0, 80) })
+            if (isFrom && !out.from) out.from = { row: ri, col: ci }
+            if (isTo && !out.to) out.to = { row: ri, col: ci }
+            if (!isFrom && !isTo && !out.to) out.to = { row: ri, col: ci }
+            if (!isFrom && !isTo && !out.from) out.from = { row: ri, col: ci }
+          }
+        }
+      }
+      return out
+    })
+  } catch {
+    return null
+  }
 }
 
 async function findPieceAtGrid(driver, gridRow, gridCol) {
@@ -652,6 +1021,19 @@ async function openXiangqiGame(driver) {
     await openLegacyHome(driver)
   }
   await syncWebBoardFromPage(driver)
+  await resetBridgeSession()
+  for (let i = 0; i < 30; i++) {
+    lastGameState = await readBotGameState(driver)
+    if (lastGameState) {
+      console.log(`[auto] botGameState OK ply=${lastGameState.moveCount} fen=${lastGameState.fen}`)
+      await syncBridgeFen(lastGameState.fen)
+      break
+    }
+    await sleep(500)
+  }
+  if (!lastGameState) {
+    console.error("[auto] 无法读取 localStorage.xiangqi.botGameState，请确认已进入人机对局")
+  }
 }
 
 async function isEndGame(driver) {
@@ -692,6 +1074,7 @@ async function getEngineMove(driver) {
     }
 
     const boardAfterEngine = webLastBoard
+    const pieceBefore = await snapshotPieceGrid(driver)
     let boardAfterOpponent
     try {
       boardAfterOpponent = await waitForStableOpponentBoard(driver, boardAfterEngine)
@@ -701,10 +1084,39 @@ async function getEngineMove(driver) {
       return
     }
 
-    const move = await resolveOpponentMove(driver, boardAfterEngine, boardAfterOpponent)
+    let move = null
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const pieceAfter = await snapshotPieceGrid(driver)
+      const curBoard =
+        attempt === 0 ? boardAfterOpponent : await readWebBoard(driver)
+      move = await resolveOpponentMove(
+        driver,
+        boardAfterEngine,
+        curBoard,
+        pieceBefore,
+        pieceAfter
+      )
+      if (isValidMove(move)) {
+        boardAfterOpponent = curBoard
+        break
+      }
+      if (attempt < 5) {
+        console.warn(`[auto] 解着失败，${attempt + 1}/6 次重试…`)
+        await sleep(700)
+      }
+    }
+
     if (!isValidMove(move)) {
-      console.error("[auto] 无法解析相弈应手，重新同步棋盘", move)
-      webLastBoard = boardAfterOpponent
+      const dom = await readLastMoveFromDOM(driver)
+      console.error(
+        "[auto] 无法解析相弈应手",
+        JSON.stringify({
+          pieceBefore: pieceBefore.length,
+          pieceAfter: (await snapshotPieceGrid(driver)).length,
+          dom,
+        })
+      )
+      webLastBoard = await readWebBoard(driver)
       return
     }
     console.log("[auto] 相弈应手", move)
@@ -720,14 +1132,11 @@ async function getEngineMove(driver) {
 
 async function doMoveOnWeb(driver, attempt = 0) {
   const MAX_ATTEMPTS = 8
-  const iccsY1 = Number(engineLastMove.charAt(0))
-  const iccsX1 = Number(engineLastMove.charAt(1))
-  const iccsY2 = Number(engineLastMove.charAt(2))
-  const iccsX2 = Number(engineLastMove.charAt(3))
-  const { from, to } = bridgeToSite(iccsX1, iccsY1, iccsX2, iccsY2)
+  const { x1, y1, x2, y2 } = parseBridge4(engineLastMove)
+  const { from, to } = bridgeToSite(x1, y1, x2, y2)
 
   console.log(
-    `[auto] 网页走子 ICCS (${iccsX1},${iccsY1})->(${iccsX2},${iccsY2})  grid (${from.gridRow},${from.gridCol})->(${to.gridRow},${to.gridCol})  r/c (${from.r},${from.c})->(${to.r},${to.c})  bridge=${engineLastMove} attempt=${attempt + 1}`
+    `[auto] 网页走子 ICCS (${x1},${y1})->(${x2},${y2})  grid (${from.gridRow},${from.gridCol})->(${to.gridRow},${to.gridCol})  r/c (${from.r},${from.c})->(${to.r},${to.c})  bridge=${engineLastMove} attempt=${attempt + 1}`
   )
 
   if (attempt >= MAX_ATTEMPTS) {
@@ -793,11 +1202,13 @@ async function getWebBoardFromPieces(driver) {
 }
 
 async function readWebBoard(driver) {
-  // 相弈棋子只有 r、无 c；优先用 #game-grid 的 square-has-piece
-  const gridBoard = await getWebBoard(driver)
-  if (countOccupied(gridBoard) >= 16) return gridBoard
   const pieceBoard = await getWebBoardFromPieces(driver)
-  if (pieceBoard && countOccupied(pieceBoard) > countOccupied(gridBoard)) return pieceBoard
+  const gridBoard = await getWebBoard(driver)
+  const pieceN = pieceBoard ? countOccupied(pieceBoard) : 0
+  const gridN = countOccupied(gridBoard)
+  if (pieceBoard && pieceN >= 16 && pieceN >= gridN) return pieceBoard
+  if (gridN >= 16) return gridBoard
+  if (pieceBoard && pieceN > gridN) return pieceBoard
   return gridBoard
 }
 
@@ -819,9 +1230,9 @@ async function getWebBoard(driver) {
   return currentBoard
 }
 
-async function getWebMove(driver, lastBoard, currentBoard) {
-  const strict = diffBoardMove(lastBoard, currentBoard)
-  if (isValidMove(strict)) return strict
+async function getWebMoveLegacy(driver, lastBoard, currentBoard, boardMoveHint) {
+  const strict = boardMoveHint || parseMoveFromBoardDiff(lastBoard, currentBoard)
+  if (strict && !strict.capture && isValidMove(strict)) return strict
 
   const fromSquares = []
   const toSquares = []
@@ -831,14 +1242,35 @@ async function getWebMove(driver, lastBoard, currentBoard) {
       if (lastBoard[i][j] === 0 && currentBoard[i][j] === 1) toSquares.push({ x2: i, y2: j })
     }
   }
-  if (fromSquares.length !== 1) return null
+  if (fromSquares.length === 0) return null
 
-  const move = { x1: fromSquares[0].x1, y1: fromSquares[0].y1, x2: -1, y2: -1 }
+  let from = fromSquares[0]
+  if (fromSquares.length > 1 && toSquares.length >= 1) {
+    const picked = pickClosest(
+      fromSquares.map((s) => [s.x1, s.y1]),
+      toSquares.map((s) => [s.x2, s.y2])
+    )
+    if (picked) from = { x1: picked.x1, y1: picked.y1 }
+  }
+
+  const move = { x1: from.x1, y1: from.y1, x2: -1, y2: -1 }
 
   if (toSquares.length === 1) {
     move.x2 = toSquares[0].x2
     move.y2 = toSquares[0].y2
     return isValidMove(move) ? move : null
+  }
+
+  if (toSquares.length > 1) {
+    const picked = pickClosest(
+      [[move.x1, move.y1]],
+      toSquares.map((s) => [s.x2, s.y2])
+    )
+    if (picked) {
+      move.x2 = picked.x2
+      move.y2 = picked.y2
+      return isValidMove(move) ? move : null
+    }
   }
 
   try {
@@ -929,14 +1361,10 @@ async function run() {
       await driver.quit()
       process.exit(1)
     }
-    console.log("[auto] 对局已开始，轮询引擎着法…")
+    console.log("[auto] 对局已开始，轮询 botGameState（网页权威局面）…")
     while (true) {
-      const prev = state
-      await getEngineMove(driver)
-      while (state === prev) {
-        await sleep(200)
-        await getEngineMove(driver)
-      }
+      await botGameLoop(driver)
+      await sleep(350)
     }
   }
 
