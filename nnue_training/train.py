@@ -6,6 +6,7 @@ import math
 import sys
 import time
 from pathlib import Path
+from dataclasses import dataclass
 from typing import Any
 
 import yaml
@@ -33,6 +34,25 @@ from labels import DEFAULT_MATE_THRESHOLD
 from quiet import filter_static_samples, format_static_filter_stats
 
 
+@dataclass(frozen=True)
+class LossConfig:
+    mse_weight: float = 0.5
+    ranking_weight: float = 0.5
+    ranking_max_pairs: int = 4096
+
+    @property
+    def use_ranking(self) -> bool:
+        return self.ranking_weight > 0.0
+
+
+def parse_loss_config(train_cfg: dict) -> LossConfig:
+    return LossConfig(
+        mse_weight=float(train_cfg.get("mse_loss_weight", 0.5)),
+        ranking_weight=float(train_cfg.get("ranking_loss_weight", 0.5)),
+        ranking_max_pairs=int(train_cfg.get("ranking_max_pairs", 4096)),
+    )
+
+
 def log_train(message: str = "") -> None:
     """Print to stderr without breaking active tqdm bars."""
     import sys
@@ -54,12 +74,23 @@ def format_epoch_summary(
     is_best: bool,
     epochs_without_improvement: int,
     patience: int,
+    loss_cfg: LossConfig,
 ) -> str:
     lines = [
         "",
         f"── epoch {epoch}/{max_epochs} ({elapsed_s:.1f}s) ──",
         f"  train_loss    {train_loss:.6f}",
         f"  val_loss      {val_loss:.6f}" + ("  ← best" if is_best else ""),
+    ]
+    if loss_cfg.use_ranking:
+        lines.extend(
+            [
+                f"  val_mse       {val_metrics['mse_loss']:.6f}",
+                f"  val_rank      {val_metrics['rank_loss']:.6f}",
+            ]
+        )
+    lines.extend(
+        [
         f"  val_mae_norm  {val_metrics['mae_norm']:.6f}",
         f"  val_rmse_norm {val_metrics['rmse_norm']:.6f}",
         f"  val_mae_vl    {val_metrics['mae_vl']:.2f} (all)",
@@ -67,7 +98,8 @@ def format_epoch_summary(
         f"  val_mae_quiet {val_metrics['mae_vl_quiet']:.2f}",
         f"  val_corr_quiet {val_metrics['corr_vl_quiet']:.4f}  "
         f"(n={val_metrics['n_quiet']:,})",
-    ]
+        ]
+    )
     if val_metrics.get("n_mate", 0) > 0:
         lines.extend(
             [
@@ -95,14 +127,31 @@ def resolve_path(base: Path, maybe_rel: str) -> Path:
     return p if p.is_absolute() else (base / p).resolve()
 
 
-def _masked_mse(preds, targets, mask):
-    """MSE over samples where ``mask`` is True. Returns scalar loss."""
+def _batch_loss(
+    preds_norm,
+    targets_norm,
+    loss_cfg: LossConfig,
+    mask=None,
+):
+    """Return ``(total, mse, ranking)`` for one batch (optionally masked)."""
     import torch
 
-    if not mask.any():
-        return preds.sum() * 0.0
-    diff = preds[mask] - targets[mask]
-    return torch.mean(diff * diff)
+    from losses import combined_mse_ranking_loss
+
+    if mask is not None:
+        if not mask.any():
+            z = preds_norm.sum() * 0.0
+            return z, z, z
+        preds_norm = preds_norm[mask]
+        targets_norm = targets_norm[mask]
+
+    return combined_mse_ranking_loss(
+        preds_norm,
+        targets_norm,
+        mse_weight=loss_cfg.mse_weight,
+        ranking_weight=loss_cfg.ranking_weight,
+        ranking_max_pairs=loss_cfg.ranking_max_pairs,
+    )
 
 
 def _accumulate_metrics(
@@ -112,7 +161,7 @@ def _accumulate_metrics(
     targets_norm,
     targets_raw,
     is_mate,
-    criterion,
+    loss_cfg: LossConfig,
     totals: dict[str, float],
     counts: dict[str, int],
 ) -> None:
@@ -128,7 +177,10 @@ def _accumulate_metrics(
         tr = targets_raw[mask]
         bs = int(mask.sum().item())
 
-        totals[f"loss_{key}"] += criterion(pn, tn).item() * bs
+        total, mse, rank = _batch_loss(pn, tn, loss_cfg)
+        totals[f"loss_{key}"] += total.item() * bs
+        totals[f"mse_{key}"] += mse.item() * bs
+        totals[f"rank_{key}"] += rank.item() * bs
         totals[f"abs_norm_{key}"] += (pn - tn).abs().sum().item()
         totals[f"sq_norm_{key}"] += ((pn - tn) ** 2).sum().item()
         totals[f"abs_vl_{key}"] += (pv - tr).abs().sum().item()
@@ -166,6 +218,8 @@ def _finalize_metrics(
     if n_all == 0:
         return {
             "loss": math.inf,
+            "mse_loss": math.inf,
+            "rank_loss": math.inf,
             "mae_norm": math.inf,
             "rmse_norm": math.inf,
             "mae_vl": math.inf,
@@ -186,6 +240,8 @@ def _finalize_metrics(
 
     return {
         "loss": totals[f"loss_{loss_key}"] / n_loss,
+        "mse_loss": totals[f"mse_{loss_key}"] / n_loss,
+        "rank_loss": totals[f"rank_{loss_key}"] / n_loss,
         "mae_norm": totals[f"abs_norm_{loss_key}"] / n_loss,
         "rmse_norm": math.sqrt(totals[f"sq_norm_{loss_key}"] / n_loss),
         "mae_vl": totals["abs_vl_all"] / n_all,
@@ -205,7 +261,7 @@ def evaluate(
     model: Any,
     loader,
     device: Any,
-    criterion,
+    loss_cfg: LossConfig,
     *,
     label_mean: float,
     label_std: float,
@@ -222,6 +278,8 @@ def evaluate(
     model.eval()
     totals: dict[str, float] = {k: 0.0 for k in (
         "loss_all", "loss_quiet",
+        "mse_all", "mse_quiet",
+        "rank_all", "rank_quiet",
         "abs_norm_all", "abs_norm_quiet",
         "sq_norm_all", "sq_norm_quiet",
         "abs_vl_all", "abs_vl_quiet",
@@ -264,7 +322,7 @@ def evaluate(
                     targets_norm=targets_norm,
                     targets_raw=targets_raw,
                     is_mate=is_mate,
-                    criterion=criterion,
+                    loss_cfg=loss_cfg,
                     totals=totals,
                     counts=counts,
                 )
@@ -314,7 +372,7 @@ def train_epoch(
     loader,
     device: Any,
     optimizer,
-    criterion,
+    loss_cfg: LossConfig,
     *,
     epoch: int,
     max_epochs: int,
@@ -351,11 +409,8 @@ def train_epoch(
 
             optimizer.zero_grad(set_to_none=True)
             preds = model(indices, offsets)
-            if exclude_mate_from_loss:
-                quiet = ~is_mate
-                loss = _masked_mse(preds, targets_norm, quiet)
-            else:
-                loss = criterion(preds, targets_norm)
+            quiet = ~is_mate if exclude_mate_from_loss else None
+            loss, _, _ = _batch_loss(preds, targets_norm, loss_cfg, mask=quiet)
             loss.backward()
             optimizer.step()
 
@@ -382,7 +437,6 @@ def train_epoch(
 
 def main() -> None:
     import torch
-    import torch.nn as nn
 
     from model.nnue import NNUE
 
@@ -597,7 +651,15 @@ def main() -> None:
         lr=train_cfg["lr"],
         weight_decay=train_cfg.get("weight_decay", 0.0),
     )
-    criterion = nn.MSELoss()
+    loss_cfg = parse_loss_config(train_cfg)
+    if loss_cfg.use_ranking:
+        log_train(
+            f"[loss] {loss_cfg.mse_weight:.2f} * MSE + "
+            f"{loss_cfg.ranking_weight:.2f} * ranking  "
+            f"(max_pairs={loss_cfg.ranking_max_pairs})"
+        )
+    else:
+        log_train(f"[loss] pure MSE (ranking_weight=0)")
 
     best_val = math.inf
     max_epochs = int(train_cfg.get("max_epochs", train_cfg.get("epochs", 384)))
@@ -620,7 +682,7 @@ def main() -> None:
             train_loader,
             device,
             optimizer,
-            criterion,
+            loss_cfg,
             epoch=epoch,
             max_epochs=max_epochs,
             use_tqdm=use_tqdm,
@@ -630,7 +692,7 @@ def main() -> None:
             model,
             val_loader,
             device,
-            criterion,
+            loss_cfg,
             label_mean=label_mean,
             label_std=label_std,
             mate_threshold=mate_threshold,
@@ -682,6 +744,7 @@ def main() -> None:
                 is_best=is_best,
                 epochs_without_improvement=epochs_without_improvement,
                 patience=patience,
+                loss_cfg=loss_cfg,
             )
         )
 

@@ -90,6 +90,21 @@ python train.py --config configs/full_gpu.yaml
 8. **CSR 打包** — 将特征压成紧凑数组
 9. **训练循环** — 全部样本参与 loss；早停与 best checkpoint 看全量 `val_loss`
 
+损失为 **50% MSE + 50% 排序损失**（默认权重，可配置）：
+
+| 分量 | 空间 | 作用 |
+|------|------|------|
+| MSE | z-score 归一化 | 约束预测量级，拟合绝对搜索分 |
+| 排序（RankNet logistic） | 同 z-score 空间 | batch 内随机 pairwise，要求预测分顺序与标签一致 |
+
+配置项（`train` 段）：
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `mse_loss_weight` | `0.5` | MSE 权重 |
+| `ranking_loss_weight` | `0.5` | 排序损失权重；设为 `0` 则退化为纯 MSE |
+| `ranking_max_pairs` | `4096` | 每个 batch 最多采样的 pairwise 对数 |
+
 ### 静态局面过滤（quiet_only）
 
 与 NNUE 文献一致：NNUE 拟合的是**静态评估**，训练样本应排除将军、将杀带，以及搜索分与 PST 差距过大的「非静态」局面。
@@ -143,14 +158,14 @@ epoch 汇总通过 `tqdm.write` 输出，不与进度条抢行。
 
 ## 训练指标
 
-损失函数为 **MSE**，在 **z-score 归一化空间**计算；同时输出还原到原始搜索分 `vl` 的指标便于直观理解。
+组合损失在 **z-score 归一化空间**计算；同时输出还原到原始搜索分 `vl` 的指标便于直观理解。
 
 ### Epoch 内（tqdm）
 
 | 字段 | 含义 |
 |------|------|
 | `train N/M` | 当前 epoch / 总 epoch；进度条为 batch 进度 |
-| `loss` | 截至当前 batch 的**训练集** running average MSE（归一化空间） |
+| `loss` | 截至当前 batch 的**训练集** running average 组合损失 | 
 | `samples` | 当前 epoch 已处理的训练样本数 |
 
 验证阶段 tqdm 显示 `val N/M`，不单独打印逐步 loss。
@@ -159,8 +174,10 @@ epoch 汇总通过 `tqdm.write` 输出，不与进度条抢行。
 
 | 指标 | 空间 | 含义 | 参考 |
 |------|------|------|------|
-| `train_loss` | 归一化 | 训练集 MSE：`(pred_norm - target_norm)²` 均值 | 越小越好；应持续下降 |
-| `val_loss` | 归一化 | 验证集 MSE；**早停与 best.pt 依据** | 越小越好 |
+| `train_loss` | 归一化 | 训练集组合损失 | 越小越好 |
+| `val_loss` | 归一化 | 验证集组合损失；**早停与 best.pt 依据** | 越小越好 |
+| `val_mse` | 归一化 | 验证集 MSE 分量（启用排序时打印） | 越小越好 |
+| `val_rank` | 归一化 | 验证集排序损失分量（启用排序时打印） | 越小越好 |
 | `val_mae_norm` | 归一化 | 验证集平均绝对误差 `\|pred_norm - target_norm\|` | 越小越好 |
 | `val_rmse_norm` | 归一化 | 验证集 RMSE | 越小越好 |
 | `val_mae_vl` | 原始 vl | 将预测还原为 `pred_vl = pred_norm * std + mean` 后的 MAE（单位：搜索分） | 越小越好；典型数百～数千 cp 视 std 而定 |
@@ -188,6 +205,9 @@ pred_vl = pred_norm * label_std + label_mean
 | `batch_size` | 2048 | 16384 | |
 | `lr` | 0.001 | 0.001 | Adam |
 | `weight_decay` | 0.0 | 0.0 | |
+| `mse_loss_weight` | 0.5 | 0.5 | MSE 分量权重 |
+| `ranking_loss_weight` | 0.5 | 0.5 | 排序损失权重 |
+| `ranking_max_pairs` | 4096 | 8192 | 每 batch pairwise 采样上限 |
 | `num_workers` | 4 | auto | DataLoader；预计算大数据集建议 0 |
 | `prefetch_factor` | 2 | 4 | `num_workers > 0` 时生效 |
 
