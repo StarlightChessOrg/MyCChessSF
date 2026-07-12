@@ -11,17 +11,27 @@
  *   OPPONENT_LEVEL      相弈人机等级 1–9（默认 9）
  *   BRIDGE_HOST         默认 127.0.0.1（WSL 桥接失败时改为 WSL IP）
  *   BRIDGE_PORT         默认 9494
- *   USER_PROFILE_DIR    Edge 用户数据目录（Windows）
+ *   USER_PROFILE_DIR    Edge 用户数据目录（默认独立目录，避免与已打开的 Edge 冲突）
  *   KILL_EDGE           设为 1 时启动前 taskkill msedge（默认 0）
  */
+
+const path = require("path")
+const fs = require("fs")
 
 const OPPONENT_LEVEL = Math.max(1, Math.min(9, Number(process.env.OPPONENT_LEVEL || 9)))
 const XIANGQI_URL = process.env.XIANGQI_URL || "https://play.xiangqi.com/computer"
 const BRIDGE_HOST = process.env.BRIDGE_HOST || "127.0.0.1"
 const BRIDGE_PORT = Number(process.env.BRIDGE_PORT || 9494)
-const USER_PROFILE_DIR =
-  process.env.USER_PROFILE_DIR ||
-  `${process.env.LOCALAPPDATA || process.env.HOME}/Microsoft/Edge/User Data`
+const DEFAULT_PROFILE_DIR = path.join(
+  process.env.LOCALAPPDATA ||
+    path.join(process.env.USERPROFILE || process.env.HOME || ".", "AppData", "Local"),
+  "MyCChessSF",
+  "edge-selenium-profile"
+)
+const USER_PROFILE_DIR = process.env.USER_PROFILE_DIR || DEFAULT_PROFILE_DIR
+const USE_SYSTEM_EDGE_PROFILE =
+  process.env.USER_PROFILE_DIR &&
+  /[\\/]Microsoft[\\/]Edge[\\/]User Data$/i.test(process.env.USER_PROFILE_DIR)
 const KILL_EDGE = process.env.KILL_EDGE === "1"
 
 const { Builder, By, until } = require("selenium-webdriver")
@@ -395,13 +405,36 @@ async function sendOpponentMove(move) {
 }
 
 async function initDriver() {
+  fs.mkdirSync(USER_PROFILE_DIR, { recursive: true })
   const options = new edge.Options()
-  options.addArguments(
+  const args = [
     `--user-data-dir=${USER_PROFILE_DIR}`,
-    "--profile-directory=Default",
-    "--log-level=3"
-  )
-  return new Builder().forBrowser("MicrosoftEdge").setEdgeOptions(options).build()
+    "--log-level=3",
+    "--disable-gpu",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--remote-allow-origins=*",
+  ]
+  if (USE_SYSTEM_EDGE_PROFILE) {
+    args.push("--profile-directory=Default")
+  }
+  options.addArguments(...args)
+  console.log(`[auto] Edge profile: ${USER_PROFILE_DIR}`)
+  if (USE_SYSTEM_EDGE_PROFILE) {
+    console.warn("[auto] 使用系统 Edge Profile；请先关闭所有 Edge 窗口，否则会启动失败")
+  }
+  try {
+    return await new Builder().forBrowser("MicrosoftEdge").setEdgeOptions(options).build()
+  } catch (err) {
+    const msg = String(err.message || err)
+    if (/DevToolsActivePort|session not created|crashed/i.test(msg)) {
+      console.error("[auto] Edge 启动失败。常见原因：")
+      console.error("[auto]   1) 系统 Edge 已打开且占用了同一 Profile — 请全部关闭 Edge 后重试")
+      console.error("[auto]   2) 不要设置 USER_PROFILE_DIR 为系统目录（默认已用独立 Profile）")
+      console.error("[auto]   3) 或在 PowerShell: $env:KILL_EDGE='1'; npm start  （会强杀 Edge）")
+    }
+    throw err
+  }
 }
 
 async function run() {

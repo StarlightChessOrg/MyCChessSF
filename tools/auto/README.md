@@ -46,14 +46,21 @@ mycchess-xiangqi-bridge --think-ms 1000
 
 默认：红方引擎、开局库（若已 build）、NNUE（若存在 `deployment/model/`）。
 
-### 2. 安装并启动 Selenium 桥（终端 B）
+### 2. 安装并启动 Selenium 桥（终端 B，**Windows PowerShell**）
+
+> 不要在 WSL bash 里跑 `npm start`。Selenium 需要启动 **Windows 版 Edge**；在 bash 里写 `$env:...` 会报错，且环境变量也传不对。
 
 ```powershell
-cd deployment\tools\auto   # 或仓库 tools\auto
+cd C:\Users\79315\Desktop\2\MyCChessSF\deployment\tools\auto   # 或仓库 tools\auto
 npm install
-$env:OPPONENT_LEVEL = "9"   # 相弈人机等级 1–9
-$env:USER_PROFILE_DIR = "$env:LOCALAPPDATA\Microsoft\Edge\User Data"
+$env:OPPONENT_LEVEL = "9"   # 相弈人机等级 1–9（可省略，默认就是 9）
 npm start
+```
+
+若在 WSL 里必须一键启动，可：
+
+```bash
+powershell.exe -NoProfile -Command "cd 'C:\Users\79315\Desktop\2\MyCChessSF\deployment\tools\auto'; `$env:OPPONENT_LEVEL='9'; npm start"
 ```
 
 脚本会打开相弈「人机对战」，选择对应等级 bot，随后自动代引擎走子。
@@ -68,7 +75,7 @@ npm start
 | `XIANGQI_URL` | `https://play.xiangqi.com/computer` | 人机对战页 |
 | `BRIDGE_HOST` | `127.0.0.1` | 引擎桥地址（WSL 桥接失败时用 WSL IP） |
 | `BRIDGE_PORT` | `9494` | 引擎桥端口 |
-| `USER_PROFILE_DIR` | Edge 用户目录 | 浏览器 Profile（登录态） |
+| `USER_PROFILE_DIR` | `%LOCALAPPDATA%\MyCChessSF\edge-selenium-profile` | 独立 Selenium Profile（勿与已开 Edge 冲突） |
 | `KILL_EDGE` | `0` | 设为 `1` 时启动前强杀 Edge（慎用） |
 
 ## HTTP 协议（与 Chess98 兼容）
@@ -98,7 +105,7 @@ Python 桥接：`mycchess_sf/xiangqi_auto_bridge.py`
 - **Windows 连不上 :9494**：WSL 桥接时，PowerShell 执行 `wsl hostname -I` 取 IP，设 `$env:BRIDGE_HOST = "<IP>"` 再 `npm start`。
 - **桥接无着法**：确认 `xqwlight_core` 已编译、BOOK/NNUE 路径正确；看 `[bridge] engine ->` 日志。
 - **网页着法失败**：相弈 DOM 变更会导致选择器失效；可设 `XIANGQI_URL=https://play.xiangqi.com/computer`。
-- **Edge 打不开**：检查 `USER_PROFILE_DIR`；勿与其他 Edge 实例共用 Profile。
+- **Edge 打不开 / DevToolsActivePort / crashed**：默认已用独立 Profile，一般无需设置 `USER_PROFILE_DIR`。若仍失败：关闭所有 Edge 窗口后重试；或在 PowerShell 设 `$env:KILL_EDGE='1'` 再 `npm start`。只有需要复用登录态时才指向系统目录，且必须先关掉 Edge。
 
 诊断脚本（WSL/Linux）：
 
