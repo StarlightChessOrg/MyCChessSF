@@ -151,7 +151,7 @@ enum class XqwlEvalMode { Raw, Full };
 
 ## staticEval 驱动剪枝（第二梯队）
 
-在 TT 缓存静态分的基础上，引入与 **Pikafish / Stockfish 同类思路** 的轻量剪枝（针对中国象棋尺度调参）。常量见 `xqwl_portable_prefix.h` 中 `FUTILITY_*` / `RAZOR_*` 等。
+在 TT 缓存静态分的基础上，引入与 **Pikafish / Stockfish 同类思路** 的轻量剪枝（针对中国象棋尺度调参，**保守配置** 以避免 NNUE 静态分噪声导致漏看战术着法）。常量见 `xqwl_portable_prefix.h` 中 `FUTILITY_*` / `RAZOR_*` 等。
 
 辅助启发：
 
@@ -164,11 +164,11 @@ enum class XqwlEvalMode { Raw, Full };
 
 | 剪枝 | 条件摘要 | 行为 |
 |------|----------|------|
-| **Razoring** | 非将、浅层、`sEval + margin < alpha` | 直接进入 QSearch |
-| **Reverse futility** | 非将、浅层、`sEval - margin >= beta` | 返回静态分 |
+| **Razoring** | 非将、`nDepth ≤ 2`、`sEval + margin < alpha` | 直接进入 QSearch |
+| **Reverse futility** | 非将、**`nDepth ≤ 3`**（独立上限，勿与 quiet futility 混用）、`sEval - margin ≥ beta` | 返回静态分 |
 | **Null-move 门控** | 仅当 `sEval >= beta - margin` | 否则跳过空着尝试 |
-| **Quiet futility** | 非吃、浅层、`sEval + margin <= alpha` | 跳过该安静着 |
-| **LMP** | 非吃、着法序号 ≥ 阈值 | 跳过后期安静着 |
+| **Quiet futility** | 非吃、**已尝试 ≥4 个安静着**、剩余扩展深度 ≤2 | 跳过该安静着 |
+| **LMP** | 非吃、**`nDepth ≥ 4`**、着法序号 ≥ 阈值 | 跳过后期安静着 |
 
 ### SearchQuiesc
 
@@ -176,9 +176,9 @@ enum class XqwlEvalMode { Raw, Full };
 |------|----------|
 | **Capture futility** | 停着分 + 被吃子估值 + margin ≤ alpha 时跳过该吃子 |
 
-被吃子 centipawn 估值由棋子类型查表（`XqwlCaptureValueCp`），与 MvvLva 排序互补。
-
 **安全边界**：将杀区（`|score| > WIN_VALUE`）内不启用上述剪枝，避免漏杀。
+
+**校核说明（2026）**：初版将 reverse futility 误用 `FUTILITY_MAX_DEPTH=6`，在较深层直接返回 NNUE 静态分，易产生「看着合理、实际荒诞」的着法；已改为 `REVERSE_FUT_MAX_DEPTH=3` 并整体降低 margin / 缩小 LMP 范围。
 
 ---
 

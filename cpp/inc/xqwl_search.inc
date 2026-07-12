@@ -608,7 +608,7 @@ static int SearchFull(int vlAlpha, int vlBeta, int nDepth, BOOL bNoNull = FALSE)
       return SearchQuiesc(vlAlpha, vlBeta);
     }
   }
-  if (!bInCheck && nDepth <= FUTILITY_MAX_DEPTH && vlBeta < WIN_VALUE && !XqwlInScoreMateZone(vlBeta)) {
+  if (!bInCheck && nDepth <= REVERSE_FUT_MAX_DEPTH && vlBeta < WIN_VALUE && !XqwlInScoreMateZone(vlBeta)) {
     int rfMargin = REVERSE_FUT_MARGIN_BASE + REVERSE_FUT_MARGIN_DEPTH * nDepth;
     if (improving) {
       rfMargin -= rfMargin / 4;
@@ -674,11 +674,14 @@ static int SearchFull(int vlAlpha, int vlBeta, int nDepth, BOOL bNoNull = FALSE)
     if (!bInCheck && !bCapture && vlBest != -MATE_VALUE) {
       const int quietDepth = (Sort.singleReply) ? nDepth : nDepth - 1;
       const int futMargin = XqwlFutilityMargin(nDepth, improving, oppWorsening);
-      if (nDepth <= FUTILITY_MAX_DEPTH && moveCount > 1 && sEval + futMargin <= vlAlpha && quietDepth <= 3) {
+      if (nDepth <= FUTILITY_MAX_DEPTH && moveCount > FUTILITY_MIN_QUIET_MOVES &&
+          quietDepth <= FUTILITY_QUIET_MAX_DEPTH && sEval + futMargin <= vlAlpha) {
         continue;
       }
-      const int lmpLimit = (3 + nDepth * nDepth) / (LMP_MOVE_DIV + static_cast<int>(improving));
-      if (nDepth <= LMP_MAX_DEPTH && moveCount >= lmpLimit && vlBest > -WIN_VALUE) {
+      const int lmpLimit =
+          (LMP_MOVE_BASE + nDepth * nDepth) / (LMP_MOVE_DIV + static_cast<int>(improving));
+      if (nDepth >= LMP_MIN_DEPTH && nDepth <= LMP_MAX_DEPTH && moveCount >= lmpLimit &&
+          vlBest > -WIN_VALUE) {
         continue;
       }
     }
