@@ -11,7 +11,7 @@
         ↕  HTTP :9494  （Chess98 兼容）
 mycchess-xiangqi-bridge
         ↕  /computer、/move?playermove=
-tools/auto/z.js  (Selenium)
+tools/auto/selenium_xiangqi_com_auto.js  (Selenium)
         ↕  DOM 点击
 play.xiangqi.com  （相弈指定等级 bot）
 ```
@@ -58,7 +58,7 @@ npm start
 
 脚本会打开相弈「人机对战」，选择对应等级 bot，随后自动代引擎走子。
 
-**注意**：当前 `z.js` 流程与 Chess98 一致，要求引擎执**红先行**（`mycchess-xiangqi-bridge` 默认 `--engine-color red`）。若引擎执黑，需等相弈 bot 先走子，脚本需另行扩展。
+**注意**：当前脚本流程与 Chess98 一致，要求引擎执**红先行**（`mycchess-xiangqi-bridge` 默认 `--engine-color red`）。若引擎执黑，需等相弈 bot 先走子，脚本需另行扩展。
 
 ### 环境变量
 
@@ -86,7 +86,7 @@ npm start
 
 | 文件 | 说明 |
 |------|------|
-| `z.js` | Selenium 主脚本（相弈网页 ↔ :9494） |
+| `selenium_xiangqi_com_auto.js` | Selenium 主脚本（相弈网页 ↔ :9494） |
 | `package.json` | Node 依赖 `selenium-webdriver` |
 
 Python 桥接：`mycchess_sf/xiangqi_auto_bridge.py`  

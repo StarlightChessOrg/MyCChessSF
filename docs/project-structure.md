@@ -43,7 +43,7 @@ MyCChessSF/
 │   └── fetch_xqwl_assets.py      拉取网页 UI 资源
 ├── tools/
 │   └── auto/                     相弈象棋 Selenium 自动对弈（见 tools/auto/README.md）
-│       ├── z.js                  网页 ↔ :9494 桥接脚本
+│       ├── selenium_xiangqi_com_auto.js   相弈网页 Selenium 自动对弈（↔ :9494）
 │       └── package.json          Node 依赖（selenium-webdriver）
 ├── .github/workflows/            CI（推送 v* 标签时自动构建 Release）
 ├── deployment/                   build_linux.sh 产出（gitignore，可部署目录）

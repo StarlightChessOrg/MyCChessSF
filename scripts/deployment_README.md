@@ -16,7 +16,7 @@ deployment/
 │   ├── mycchess-xiangqi-bridge    相弈象棋 HTTP 桥（:9494）
 │   └── xqwl_gen_nnue              NNUE 训练数据生成器
 ├── tools/
-│   └── auto/                      相弈 Selenium 脚本（z.js；Windows + Edge）
+│   └── auto/                      相弈 Selenium（selenium_xiangqi_com_auto.js；Windows + Edge）
 ├── db/
 │   └── BOOK.DAT               开局库
 └── model/
@@ -42,7 +42,7 @@ pip install -r deployment/requirements.txt
 
 ## 相弈象棋自动对弈桥（:9494）
 
-供 `tools/auto/z.js`（Selenium）连接，协议与 Chess98 UI 模式兼容。桥接服务跑在 **Linux 部署包** 上；Selenium 脚本通常在 **Windows + Edge** 端执行。
+供 `tools/auto/selenium_xiangqi_com_auto.js`（Selenium）连接，协议与 Chess98 UI 模式兼容。桥接服务跑在 **Linux 部署包** 上；Selenium 脚本通常在 **Windows + Edge** 端执行。
 
 ```bash
 ./deployment/bin/mycchess-xiangqi-bridge --think-ms 1000

@@ -47,7 +47,7 @@ git submodule update --init --recursive
 |------|------|
 | `deployment/lib/` | `xqwlight_core*.so` + `mycchess_sf/`（网页对弈） |
 | `deployment/bin/` | `mycchess-play-web`、`mycchess-xiangqi-bridge`、`xqwl_gen_nnue` |
-| `deployment/tools/auto/` | 相弈 Selenium 脚本（`z.js`） |
+| `deployment/tools/auto/` | 相弈 Selenium 脚本（`selenium_xiangqi_com_auto.js`） |
 | `deployment/db/BOOK.DAT` | 开局库 |
 | `deployment/model/` | INT8 NNUE（来自 `data/nnue_model/`） |
 | `deployment/requirements.txt` | 对弈服务 Python 依赖 |

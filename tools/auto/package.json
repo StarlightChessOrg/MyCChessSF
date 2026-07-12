@@ -4,7 +4,7 @@
   "private": true,
   "description": "Selenium bridge: 象眸 SF engine vs 相弈象棋 (play.xiangqi.com) bot levels",
   "scripts": {
-    "start": "node z.js"
+    "start": "node selenium_xiangqi_com_auto.js"
   },
   "dependencies": {
     "selenium-webdriver": "^4.27.0"

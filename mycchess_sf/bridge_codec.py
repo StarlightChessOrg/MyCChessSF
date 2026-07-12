@@ -19,7 +19,7 @@ def move_id_to_iccs(move_id: int) -> str:
 
 
 def bridge4_to_iccs(code: str) -> str:
-    """Decode z.js ``playermove`` (y1x1y2x2) or 5-digit Chess98 move id."""
+    """Decode Selenium ``playermove`` (y1x1y2x2) or 5-digit Chess98 move id."""
     digits = "".join(c for c in code.strip() if c.isdigit())
     if not digits:
         raise ValueError(f"Invalid bridge move: {code!r}")
@@ -37,5 +37,5 @@ def iccs_to_bridge4(iccs: str) -> str:
 
 
 def iccs_to_computer_token(iccs: str) -> str:
-    """Token for ``GET /computer`` (4-digit y1x1y2x2, z.js compatible)."""
+    """Token for ``GET /computer`` (4-digit y1x1y2x2, Selenium client compatible)."""
     return iccs_to_bridge4(iccs)
