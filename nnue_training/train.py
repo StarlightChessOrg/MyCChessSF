@@ -29,6 +29,46 @@ from data.dataset import (
 from features.xqwl_psq import N_FEATURES
 
 
+def log_train(message: str = "") -> None:
+    """Print without breaking active tqdm bars."""
+    from tqdm import tqdm
+
+    tqdm.write(message)
+
+
+def format_epoch_summary(
+    *,
+    epoch: int,
+    max_epochs: int,
+    elapsed_s: float,
+    train_loss: float,
+    val_metrics: dict[str, float],
+    val_loss: float,
+    best_val: float,
+    is_best: bool,
+    epochs_without_improvement: int,
+    patience: int,
+) -> str:
+    lines = [
+        "",
+        f"── epoch {epoch}/{max_epochs} ({elapsed_s:.1f}s) ──",
+        f"  train_loss    {train_loss:.6f}",
+        f"  val_loss      {val_loss:.6f}" + ("  ← best" if is_best else ""),
+        f"  val_mae_norm  {val_metrics['mae_norm']:.6f}",
+        f"  val_rmse_norm {val_metrics['rmse_norm']:.6f}",
+        f"  val_mae_vl    {val_metrics['mae_vl']:.2f}",
+        f"  val_corr_vl   {val_metrics['corr_vl']:.4f}",
+    ]
+    if is_best:
+        prev = "n/a" if not math.isfinite(best_val) else f"{best_val:.6f}"
+        lines.append(f"  checkpoint    saved best.pt (prev best {prev})")
+    else:
+        lines.append(
+            f"  early_stop    no improvement ({epochs_without_improvement}/{patience})"
+        )
+    return "\n".join(lines)
+
+
 def load_config(path: Path) -> dict:
     with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
@@ -67,31 +107,45 @@ def evaluate(
     sum_cross = 0.0
 
     non_blocking = device.type == "cuda"
-    batch_iter = tqdm(loader, desc=desc, unit="batch", leave=False) if use_tqdm else loader
+    batch_iter = (
+        tqdm(
+            loader,
+            desc=desc,
+            unit="batch",
+            leave=False,
+            dynamic_ncols=True,
+        )
+        if use_tqdm
+        else loader
+    )
 
-    with torch.no_grad():
-        for indices, offsets, targets_norm, targets_raw in batch_iter:
-            indices = indices.to(device, non_blocking=non_blocking)
-            offsets = offsets.to(device, non_blocking=non_blocking)
-            targets_norm = targets_norm.to(device, non_blocking=non_blocking)
-            targets_raw = targets_raw.to(device, non_blocking=non_blocking)
+    try:
+        with torch.no_grad():
+            for indices, offsets, targets_norm, targets_raw in batch_iter:
+                indices = indices.to(device, non_blocking=non_blocking)
+                offsets = offsets.to(device, non_blocking=non_blocking)
+                targets_norm = targets_norm.to(device, non_blocking=non_blocking)
+                targets_raw = targets_raw.to(device, non_blocking=non_blocking)
 
-            preds_norm = model(indices, offsets)
-            loss = criterion(preds_norm, targets_norm)
-            preds_vl = preds_norm * label_std + label_mean
+                preds_norm = model(indices, offsets)
+                loss = criterion(preds_norm, targets_norm)
+                preds_vl = preds_norm * label_std + label_mean
 
-            bs = targets_norm.size(0)
-            total_loss += loss.item() * bs
-            total_abs_norm += (preds_norm - targets_norm).abs().sum().item()
-            total_sq_norm += ((preds_norm - targets_norm) ** 2).sum().item()
-            total_abs_vl += (preds_vl - targets_raw).abs().sum().item()
+                bs = targets_norm.size(0)
+                total_loss += loss.item() * bs
+                total_abs_norm += (preds_norm - targets_norm).abs().sum().item()
+                total_sq_norm += ((preds_norm - targets_norm) ** 2).sum().item()
+                total_abs_vl += (preds_vl - targets_raw).abs().sum().item()
 
-            sum_pred += preds_vl.sum().item()
-            sum_true += targets_raw.sum().item()
-            sum_pred_sq += (preds_vl * preds_vl).sum().item()
-            sum_true_sq += (targets_raw * targets_raw).sum().item()
-            sum_cross += (preds_vl * targets_raw).sum().item()
-            n += bs
+                sum_pred += preds_vl.sum().item()
+                sum_true += targets_raw.sum().item()
+                sum_pred_sq += (preds_vl * preds_vl).sum().item()
+                sum_true_sq += (targets_raw * targets_raw).sum().item()
+                sum_cross += (preds_vl * targets_raw).sum().item()
+                n += bs
+    finally:
+        if use_tqdm and isinstance(batch_iter, tqdm):
+            batch_iter.close()
 
     if n == 0:
         return {
@@ -170,33 +224,38 @@ def train_epoch(
             loader,
             desc=f"train {epoch}/{max_epochs}",
             unit="batch",
-            leave=True,
+            leave=False,
+            dynamic_ncols=True,
         )
         if use_tqdm
         else loader
     )
 
-    for indices, offsets, targets_norm, _targets_raw in batch_iter:
-        indices = indices.to(device, non_blocking=non_blocking)
-        offsets = offsets.to(device, non_blocking=non_blocking)
-        targets_norm = targets_norm.to(device, non_blocking=non_blocking)
+    try:
+        for indices, offsets, targets_norm, _targets_raw in batch_iter:
+            indices = indices.to(device, non_blocking=non_blocking)
+            offsets = offsets.to(device, non_blocking=non_blocking)
+            targets_norm = targets_norm.to(device, non_blocking=non_blocking)
 
-        optimizer.zero_grad(set_to_none=True)
-        preds = model(indices, offsets)
-        loss = criterion(preds, targets_norm)
-        loss.backward()
-        optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+            preds = model(indices, offsets)
+            loss = criterion(preds, targets_norm)
+            loss.backward()
+            optimizer.step()
 
-        bs = targets_norm.size(0)
-        total_loss += loss.item() * bs
-        n += bs
+            bs = targets_norm.size(0)
+            total_loss += loss.item() * bs
+            n += bs
 
+            if use_tqdm and isinstance(batch_iter, tqdm):
+                batch_iter.set_postfix(
+                    loss=f"{total_loss / n:.6f}",
+                    samples=f"{n:,}",
+                    refresh=False,
+                )
+    finally:
         if use_tqdm and isinstance(batch_iter, tqdm):
-            batch_iter.set_postfix(
-                loss=f"{total_loss / n:.6f}",
-                samples=f"{n:,}",
-                refresh=False,
-            )
+            batch_iter.close()
 
     return total_loss / max(n, 1)
 
@@ -361,15 +420,8 @@ def main() -> None:
         )
         val_loss = val_metrics["loss"]
         epoch_elapsed = time.time() - epoch_t0
-
-        print(
-            f"epoch {epoch}/{max_epochs} done ({epoch_elapsed:.1f}s)  "
-            f"train_loss={train_loss:.6f}  val_loss={val_loss:.6f}  "
-            f"val_mae_norm={val_metrics['mae_norm']:.6f}  "
-            f"val_rmse_norm={val_metrics['rmse_norm']:.6f}  "
-            f"val_mae_vl={val_metrics['mae_vl']:.2f}  val_corr_vl={val_metrics['corr_vl']:.4f}",
-            flush=True,
-        )
+        prev_best = best_val
+        is_best = val_loss < prev_best
 
         save_checkpoint(
             ckpt_dir / "last.pt",
@@ -382,7 +434,7 @@ def main() -> None:
             config=cfg,
         )
 
-        if val_loss < best_val:
+        if is_best:
             best_val = val_loss
             epochs_without_improvement = 0
             save_checkpoint(
@@ -395,22 +447,51 @@ def main() -> None:
                 label_std=label_std,
                 config=cfg,
             )
-            print(f"  saved best.pt  val_loss={val_loss:.6f}")
         else:
             epochs_without_improvement += 1
-            print(
-                f"  no val_loss improvement  "
-                f"({epochs_without_improvement}/{patience})"
-            )
-            if epochs_without_improvement >= patience:
-                print(
-                    f"\n[early stop] patience={patience} reached at epoch {epoch}  "
-                    f"best val_loss={best_val:.6f}"
-                )
-                break
 
-    print(f"\n[done] best val_loss={best_val:.6f}")
-    print(f"checkpoints: {ckpt_dir / 'best.pt'} , {ckpt_dir / 'last.pt'}")
+        if use_tqdm:
+            log_train(
+                format_epoch_summary(
+                    epoch=epoch,
+                    max_epochs=max_epochs,
+                    elapsed_s=epoch_elapsed,
+                    train_loss=train_loss,
+                    val_metrics=val_metrics,
+                    val_loss=val_loss,
+                    best_val=prev_best,
+                    is_best=is_best,
+                    epochs_without_improvement=epochs_without_improvement,
+                    patience=patience,
+                )
+            )
+        else:
+            print(
+                f"epoch {epoch}/{max_epochs} done ({epoch_elapsed:.1f}s)  "
+                f"train_loss={train_loss:.6f}  val_loss={val_loss:.6f}  "
+                f"val_mae_norm={val_metrics['mae_norm']:.6f}  "
+                f"val_rmse_norm={val_metrics['rmse_norm']:.6f}  "
+                f"val_mae_vl={val_metrics['mae_vl']:.2f}  val_corr_vl={val_metrics['corr_vl']:.4f}",
+                flush=True,
+            )
+            if is_best:
+                print(f"  saved best.pt  val_loss={val_loss:.6f}", flush=True)
+            else:
+                print(
+                    f"  no val_loss improvement  "
+                    f"({epochs_without_improvement}/{patience})",
+                    flush=True,
+                )
+
+        if not is_best and epochs_without_improvement >= patience:
+            log_train(
+                f"[early stop] patience={patience} reached at epoch {epoch}  "
+                f"best val_loss={best_val:.6f}"
+            )
+            break
+
+    log_train(f"[done] best val_loss={best_val:.6f}")
+    log_train(f"checkpoints: {ckpt_dir / 'best.pt'} , {ckpt_dir / 'last.pt'}")
 
 
 if __name__ == "__main__":

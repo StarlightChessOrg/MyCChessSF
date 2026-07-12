@@ -90,17 +90,23 @@ python train.py --config configs/full_gpu.yaml
 示例日志片段：
 
 ```text
-[device] cuda=NVIDIA GeForce RTX 4070 Ti SUPER
-[data] source=.../nnue_data  pattern='merged.txt'  load_workers=auto (8, cpu=32)
-[data] train=10,783,368  val=108,922  skipped=0
-[label] z-score mean=180.9781  std=2230.4628
-[data] packing 10,783,368 samples into CSR arrays ...
-[loader] num_workers=auto (0, precomputed in-memory)  batch_size=16384  storage=csr
-[model] params=664,193
-train 1/384:  12%|██        | 80/659 [00:32<03:52, loss=0.842100, samples=1,310,720]
-epoch 1/384 done (412.3s)  train_loss=0.831204  val_loss=0.798112  val_mae_norm=0.712345  val_rmse_norm=0.893210  val_mae_vl=1587.42  val_corr_vl=0.9234
-  saved best.pt  val_loss=0.798112
+train 1/384: 100%|██████████| 659/659 [00:35<00:00, 18.50batch/s, loss=0.614805, samples=10,783,368]
+val 1/384:   100%|██████████| 7/7 [00:00<00:00, 42.10batch/s]
+
+── epoch 1/384 (35.9s) ──
+  train_loss    0.614805
+  val_loss      0.519952  ← best
+  val_mae_norm  0.258649
+  val_rmse_norm 0.721077
+  val_mae_vl    576.94
+  val_corr_vl   0.6913
+  checkpoint    saved best.pt (prev best n/a)
+
+train 2/384: 100%|██████████| 659/659 [00:49<00:00, 13.26batch/s]
+...
 ```
+
+epoch 汇总通过 `tqdm.write` 输出，不与进度条抢行。
 
 ## 训练指标
 
