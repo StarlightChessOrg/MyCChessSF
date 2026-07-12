@@ -6,10 +6,11 @@ data:
   val_seed: 42
   load_workers: auto
   dedupe_fen: true
-  quiet_only: true
+  quiet_only: false
   quiet_pst_margin: 70
   mate_threshold: 9800
   mate_remap: false
+  mate_exclude_from_zscore: true
 
 model:
   n_features: 1260

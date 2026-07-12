@@ -36,6 +36,7 @@ class Sample:
     pst: float | None = None
     in_check: bool | None = None
     feat_indices: np.ndarray | None = None
+    orig_count: int = 1
 
 
 def fen_dedupe_key(fen: str) -> str:
@@ -88,7 +89,9 @@ def _finalize_dedupe_chunk(
     for _key, (fen, vl_sum, count, pst, in_check) in items:
         if count > 1:
             groups_merged += 1
-        deduped.append(Sample(fen=fen, vl=vl_sum / count, pst=pst, in_check=in_check))
+        deduped.append(
+            Sample(fen=fen, vl=vl_sum / count, pst=pst, in_check=in_check, orig_count=count)
+        )
     return deduped, groups_merged
 
 
@@ -110,7 +113,9 @@ def _finalize_dedupe_groups(
         for index, (_key, (fen, vl_sum, count, pst, in_check)) in enumerate(items, start=1):
             if count > 1:
                 groups_merged += 1
-            deduped.append(Sample(fen=fen, vl=vl_sum / count, pst=pst, in_check=in_check))
+            deduped.append(
+                Sample(fen=fen, vl=vl_sum / count, pst=pst, in_check=in_check, orig_count=count)
+            )
             if progress_every > 0 and index % progress_every == 0:
                 print(
                     f"[data]   dedupe average {index:,}/{total:,} unique FEN",
@@ -152,7 +157,7 @@ def dedupe_samples_by_fen(
 ) -> tuple[list[Sample], dict[str, int]]:
     """Merge duplicate positions; keep the mean ``vl`` per FEN key."""
     if not samples:
-        return [], {"before": 0, "after": 0, "removed": 0, "groups_merged": 0}
+        return [], {"before": 0, "after": 0, "removed": 0, "groups_merged": 0, "total_orig_count": 0}
 
     before = len(samples)
     workers, workers_label = parse_worker_count(load_workers, default_auto=False)
@@ -207,6 +212,7 @@ def dedupe_samples_by_fen(
         "after": after,
         "removed": before - after,
         "groups_merged": groups_merged,
+        "total_orig_count": before,
     }
 
 
@@ -322,6 +328,7 @@ def _featurize_sample(sample: Sample) -> Sample:
         pst=sample.pst,
         in_check=sample.in_check,
         feat_indices=fen_to_feature_indices(sample.fen),
+        orig_count=sample.orig_count,
     )
 
 
@@ -371,12 +378,32 @@ def precompute_features(
     return result
 
 
+def compute_loss_weights(
+    samples: list[Sample],
+    *,
+    pool_total_before: int | None = None,
+) -> np.ndarray:
+    """Per-sample weight = sqrt(orig_count / rows before dedupe in this pool)."""
+    if not samples:
+        return np.empty(0, dtype=np.float32)
+    total_before = pool_total_before
+    if total_before is None:
+        total_before = sum(sample.orig_count for sample in samples)
+    if total_before <= 0:
+        raise ValueError("Cannot compute loss weights: pool_total_before is zero")
+    return np.array(
+        [np.sqrt(sample.orig_count / total_before) for sample in samples],
+        dtype=np.float32,
+    )
+
+
 def pack_precomputed_dataset(
     samples: list[Sample],
     *,
     label_mean: float,
     label_std: float,
     mate_threshold: float = DEFAULT_MATE_THRESHOLD,
+    pool_total_before: int | None = None,
 ) -> "PrecomputedNnueDataset":
     if not samples:
         raise ValueError("Cannot pack empty sample list")
@@ -398,6 +425,7 @@ def pack_precomputed_dataset(
     targets_norm = np.empty(n_samples, dtype=np.float32)
     targets_raw = np.empty(n_samples, dtype=np.float32)
     is_mate = np.empty(n_samples, dtype=np.bool_)
+    loss_weights = compute_loss_weights(samples, pool_total_before=pool_total_before)
 
     pos = 0
     for i, sample in enumerate(samples):
@@ -412,10 +440,13 @@ def pack_precomputed_dataset(
         is_mate[i] = is_mate_label(sample.vl, threshold=mate_threshold)
     feat_offsets[n_samples] = pos
 
+    weight_min = float(loss_weights.min())
+    weight_max = float(loss_weights.max())
     print(
         f"[data] pack complete: indices={feat_indices.nbytes / 1024 / 1024:.1f} MiB, "
         f"offsets={feat_offsets.nbytes / 1024:.1f} KiB, "
-        f"mate={int(is_mate.sum()):,} quiet={int((~is_mate).sum()):,}",
+        f"mate={int(is_mate.sum()):,} quiet={int((~is_mate).sum()):,}, "
+        f"loss_weight=[{weight_min:.2e}, {weight_max:.2e}]",
         flush=True,
     )
     return PrecomputedNnueDataset(
@@ -424,6 +455,7 @@ def pack_precomputed_dataset(
         targets_norm=targets_norm,
         targets_raw=targets_raw,
         is_mate=is_mate,
+        loss_weights=loss_weights,
         mate_threshold=mate_threshold,
     )
 
@@ -757,6 +789,7 @@ def remap_mate_labels_in_samples(
                     pst=sample.pst,
                     in_check=sample.in_check,
                     feat_indices=sample.feat_indices,
+                    orig_count=sample.orig_count,
                 )
             )
         else:
@@ -832,21 +865,23 @@ class NnueDataset:
         label_mean: float,
         label_std: float,
         mate_threshold: float = DEFAULT_MATE_THRESHOLD,
+        pool_total_before: int | None = None,
     ) -> None:
         self.samples = samples
         self.label_mean = label_mean
         self.label_std = label_std
         self.mate_threshold = mate_threshold
+        self.loss_weights = compute_loss_weights(samples, pool_total_before=pool_total_before)
 
     def __len__(self) -> int:
         return len(self.samples)
 
-    def __getitem__(self, idx: int) -> tuple[np.ndarray, float, float, bool]:
+    def __getitem__(self, idx: int) -> tuple[np.ndarray, float, float, bool, float]:
         s = self.samples[idx]
         indices = s.feat_indices if s.feat_indices is not None else fen_to_feature_indices(s.fen)
         target_norm = (s.vl - self.label_mean) / self.label_std
         mate = is_mate_label(s.vl, threshold=self.mate_threshold)
-        return indices, target_norm, s.vl, mate
+        return indices, target_norm, s.vl, mate, float(self.loss_weights[idx])
 
 
 class PrecomputedNnueDataset:
@@ -860,6 +895,7 @@ class PrecomputedNnueDataset:
         targets_norm: np.ndarray,
         targets_raw: np.ndarray,
         is_mate: np.ndarray,
+        loss_weights: np.ndarray,
         mate_threshold: float = DEFAULT_MATE_THRESHOLD,
     ) -> None:
         self.feat_indices = feat_indices
@@ -867,12 +903,13 @@ class PrecomputedNnueDataset:
         self.targets_norm = targets_norm
         self.targets_raw = targets_raw
         self.is_mate = is_mate
+        self.loss_weights = loss_weights
         self.mate_threshold = mate_threshold
 
     def __len__(self) -> int:
         return len(self.targets_norm)
 
-    def __getitem__(self, idx: int) -> tuple[np.ndarray, float, float, bool]:
+    def __getitem__(self, idx: int) -> tuple[np.ndarray, float, float, bool, float]:
         start = int(self.feat_offsets[idx])
         end = int(self.feat_offsets[idx + 1])
         return (
@@ -880,13 +917,14 @@ class PrecomputedNnueDataset:
             float(self.targets_norm[idx]),
             float(self.targets_raw[idx]),
             bool(self.is_mate[idx]),
+            float(self.loss_weights[idx]),
         )
 
 
-def collate_fn(batch: list[tuple[np.ndarray, float, float, bool]]) -> tuple[Any, ...]:
+def collate_fn(batch: list[tuple[np.ndarray, float, float, bool, float]]) -> tuple[Any, ...]:
     import torch
 
-    feat_arrays = [feat_indices for feat_indices, _, _, _ in batch]
+    feat_arrays = [feat_indices for feat_indices, _, _, _, _ in batch]
     indices_arr = np.concatenate(feat_arrays) if len(feat_arrays) > 1 else feat_arrays[0]
     offsets = np.empty(len(batch), dtype=np.int64)
     offset = 0
@@ -894,9 +932,10 @@ def collate_fn(batch: list[tuple[np.ndarray, float, float, bool]]) -> tuple[Any,
         offsets[i] = offset
         offset += len(feat_indices)
 
-    targets_norm = np.array([target_norm for _, target_norm, _, _ in batch], dtype=np.float32)
-    targets_raw = np.array([raw for _, _, raw, _ in batch], dtype=np.float32)
-    is_mate = np.array([mate for _, _, _, mate in batch], dtype=np.bool_)
+    targets_norm = np.array([target_norm for _, target_norm, _, _, _ in batch], dtype=np.float32)
+    targets_raw = np.array([raw for _, _, raw, _, _ in batch], dtype=np.float32)
+    is_mate = np.array([mate for _, _, _, mate, _ in batch], dtype=np.bool_)
+    loss_weights = np.array([weight for _, _, _, _, weight in batch], dtype=np.float32)
 
     return (
         torch.from_numpy(np.ascontiguousarray(indices_arr, dtype=np.int64)),
@@ -904,6 +943,7 @@ def collate_fn(batch: list[tuple[np.ndarray, float, float, bool]]) -> tuple[Any,
         torch.from_numpy(targets_norm),
         torch.from_numpy(targets_raw),
         torch.from_numpy(is_mate),
+        torch.from_numpy(loss_weights),
     )
 
 

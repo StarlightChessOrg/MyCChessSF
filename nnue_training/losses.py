@@ -4,18 +4,26 @@ from __future__ import annotations
 import torch
 
 
-def pairwise_ranking_loss(
+def weighted_mse(
     pred: torch.Tensor,
     target: torch.Tensor,
+    weights: torch.Tensor,
+) -> torch.Tensor:
+    wsum = weights.sum()
+    if wsum <= 0:
+        return pred.sum() * 0.0
+    sq = (pred - target) ** 2
+    return (weights * sq).sum() / wsum
+
+
+def weighted_pairwise_ranking_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    weights: torch.Tensor,
     *,
     max_pairs: int = 4096,
 ) -> torch.Tensor:
-    """Logistic pairwise ranking loss (RankNet-style).
-
-    Random pairs (i, j) with target_i != target_j; penalizes pred ordering that
-    disagrees with the label ordering. Order is invariant to affine target scale,
-    so normalized z-score space matches raw vl ordering.
-    """
+    """Logistic pairwise ranking loss with symmetric pair weights."""
     n = pred.numel()
     if n < 2:
         return pred.sum() * 0.0
@@ -34,7 +42,58 @@ def pairwise_ranking_loss(
 
     sign = torch.sign(diff_t[mask])
     diff_p = pred[i][mask] - pred[j][mask]
-    return torch.nn.functional.softplus(-sign * diff_p).mean()
+    pair_loss = torch.nn.functional.softplus(-sign * diff_p)
+    pair_w = (weights[i][mask] + weights[j][mask]) * 0.5
+    wsum = pair_w.sum()
+    if wsum <= 0:
+        return pred.sum() * 0.0
+    return (pair_w * pair_loss).sum() / wsum
+
+
+def pairwise_ranking_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    *,
+    max_pairs: int = 4096,
+) -> torch.Tensor:
+    """Unweighted logistic pairwise ranking loss (RankNet-style)."""
+    n = pred.numel()
+    if n < 2:
+        return pred.sum() * 0.0
+    weights = torch.ones(n, device=pred.device, dtype=pred.dtype)
+    return weighted_pairwise_ranking_loss(pred, target, weights, max_pairs=max_pairs)
+
+
+def mate_aware_weighted_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    weights: torch.Tensor,
+    is_mate: torch.Tensor,
+    *,
+    mse_weight: float = 0.5,
+    ranking_weight: float = 0.5,
+    ranking_max_pairs: int = 4096,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Quiet samples: MSE + ranking. Mate samples: ranking only."""
+    quiet = ~is_mate
+
+    if quiet.any() and mse_weight > 0.0:
+        mse = weighted_mse(pred[quiet], target[quiet], weights[quiet])
+    else:
+        mse = pred.sum() * 0.0
+
+    if ranking_weight > 0.0:
+        rank = weighted_pairwise_ranking_loss(
+            pred,
+            target,
+            weights,
+            max_pairs=ranking_max_pairs,
+        )
+    else:
+        rank = pred.sum() * 0.0
+
+    total = mse_weight * mse + ranking_weight * rank
+    return total, mse, rank
 
 
 def combined_mse_ranking_loss(
@@ -45,12 +104,16 @@ def combined_mse_ranking_loss(
     ranking_weight: float = 0.5,
     ranking_max_pairs: int = 4096,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Return ``(total, mse, ranking)`` scalar losses."""
-    mse = torch.mean((pred - target) ** 2)
-    if ranking_weight <= 0.0:
-        rank = pred.sum() * 0.0
-        return mse_weight * mse, mse, rank
-
-    rank = pairwise_ranking_loss(pred, target, max_pairs=ranking_max_pairs)
-    total = mse_weight * mse + ranking_weight * rank
-    return total, mse, rank
+    """Unweighted hybrid loss (legacy helper)."""
+    n = pred.numel()
+    weights = torch.ones(n, device=pred.device, dtype=pred.dtype)
+    is_mate = torch.zeros(n, device=pred.device, dtype=torch.bool)
+    return mate_aware_weighted_loss(
+        pred,
+        target,
+        weights,
+        is_mate,
+        mse_weight=mse_weight,
+        ranking_weight=ranking_weight,
+        ranking_max_pairs=ranking_max_pairs,
+    )

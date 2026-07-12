@@ -93,8 +93,8 @@ def format_epoch_summary(
         [
         f"  val_mae_norm  {val_metrics['mae_norm']:.6f}",
         f"  val_rmse_norm {val_metrics['rmse_norm']:.6f}",
-        f"  val_mae_vl    {val_metrics['mae_vl']:.2f} (all)",
-        f"  val_corr_vl   {val_metrics['corr_vl']:.4f} (all)",
+        f"  val_mae_vl    {val_metrics['mae_vl']:.2f} (quiet)",
+        f"  val_corr_vl   {val_metrics['corr_vl']:.4f} (quiet)",
         f"  val_mae_quiet {val_metrics['mae_vl_quiet']:.2f}",
         f"  val_corr_quiet {val_metrics['corr_vl_quiet']:.4f}  "
         f"(n={val_metrics['n_quiet']:,})",
@@ -103,8 +103,8 @@ def format_epoch_summary(
     if val_metrics.get("n_mate", 0) > 0:
         lines.extend(
             [
-                f"  val_mate      skipped n={val_metrics['n_mate']:,}",
-                f"                (|vl|>={val_metrics['mate_threshold']:.0f})",
+                f"  val_mate      rank-only n={val_metrics['n_mate']:,}",
+                f"                (|vl|>={val_metrics['mate_threshold']:.0f}, no MSE/corr)",
             ]
         )
     if is_best:
@@ -130,24 +130,18 @@ def resolve_path(base: Path, maybe_rel: str) -> Path:
 def _batch_loss(
     preds_norm,
     targets_norm,
+    loss_weights,
+    is_mate,
     loss_cfg: LossConfig,
-    mask=None,
 ):
-    """Return ``(total, mse, ranking)`` for one batch (optionally masked)."""
-    import torch
+    """Return ``(total, mse, ranking)`` for one batch."""
+    from losses import mate_aware_weighted_loss
 
-    from losses import combined_mse_ranking_loss
-
-    if mask is not None:
-        if not mask.any():
-            z = preds_norm.sum() * 0.0
-            return z, z, z
-        preds_norm = preds_norm[mask]
-        targets_norm = targets_norm[mask]
-
-    return combined_mse_ranking_loss(
+    return mate_aware_weighted_loss(
         preds_norm,
         targets_norm,
+        loss_weights,
+        is_mate,
         mse_weight=loss_cfg.mse_weight,
         ranking_weight=loss_cfg.ranking_weight,
         ranking_max_pairs=loss_cfg.ranking_max_pairs,
@@ -161,6 +155,7 @@ def _accumulate_metrics(
     targets_norm,
     targets_raw,
     is_mate,
+    loss_weights,
     loss_cfg: LossConfig,
     totals: dict[str, float],
     counts: dict[str, int],
@@ -168,29 +163,51 @@ def _accumulate_metrics(
     import torch
 
     quiet = ~is_mate
-    for key, mask in (("all", torch.ones_like(is_mate, dtype=torch.bool)), ("quiet", quiet)):
-        if not mask.any():
-            continue
-        pn = preds_norm[mask]
-        tn = targets_norm[mask]
-        pv = preds_vl[mask]
-        tr = targets_raw[mask]
-        bs = int(mask.sum().item())
+    weight_sum = float(loss_weights.sum().item())
+    if weight_sum <= 0:
+        return
 
-        total, mse, rank = _batch_loss(pn, tn, loss_cfg)
-        totals[f"loss_{key}"] += total.item() * bs
-        totals[f"mse_{key}"] += mse.item() * bs
-        totals[f"rank_{key}"] += rank.item() * bs
-        totals[f"abs_norm_{key}"] += (pn - tn).abs().sum().item()
-        totals[f"sq_norm_{key}"] += ((pn - tn) ** 2).sum().item()
-        totals[f"abs_vl_{key}"] += (pv - tr).abs().sum().item()
+    total, mse, rank = _batch_loss(
+        preds_norm, targets_norm, loss_weights, is_mate, loss_cfg
+    )
+    totals["loss_all"] += total.item() * weight_sum
+    totals["rank_all"] += rank.item() * weight_sum
+    totals["weight_all"] += weight_sum
 
-        totals[f"sum_pred_{key}"] += pv.sum().item()
-        totals[f"sum_true_{key}"] += tr.sum().item()
-        totals[f"sum_pred_sq_{key}"] += (pv * pv).sum().item()
-        totals[f"sum_true_sq_{key}"] += (tr * tr).sum().item()
-        totals[f"sum_cross_{key}"] += (pv * tr).sum().item()
-        counts[key] += bs
+    if quiet.any():
+        quiet_weights = loss_weights[quiet]
+        quiet_weight_sum = float(quiet_weights.sum().item())
+        totals["mse_quiet"] += mse.item() * quiet_weight_sum
+        pn = preds_norm[quiet]
+        tn = targets_norm[quiet]
+        pv = preds_vl[quiet]
+        tr = targets_raw[quiet]
+        totals["abs_norm_quiet"] += (quiet_weights * (pn - tn).abs()).sum().item()
+        totals["sq_norm_quiet"] += (quiet_weights * (pn - tn) ** 2).sum().item()
+        totals["abs_vl_quiet"] += (quiet_weights * (pv - tr).abs()).sum().item()
+        totals["sum_pred_quiet"] += (quiet_weights * pv).sum().item()
+        totals["sum_true_quiet"] += (quiet_weights * tr).sum().item()
+        totals["sum_pred_sq_quiet"] += (quiet_weights * pv * pv).sum().item()
+        totals["sum_true_sq_quiet"] += (quiet_weights * tr * tr).sum().item()
+        totals["sum_cross_quiet"] += (quiet_weights * pv * tr).sum().item()
+        totals["weight_quiet"] += quiet_weight_sum
+        counts["quiet"] += int(quiet.sum().item())
+
+    counts["mate"] = counts.get("mate", 0) + int(is_mate.sum().item())
+    counts["all"] += int(preds_norm.size(0))
+
+
+def _weighted_corr(totals: dict[str, float], key: str) -> float:
+    wsum = totals.get(f"weight_{key}", 0.0)
+    if wsum <= 0:
+        return math.nan
+    mean_pred = totals[f"sum_pred_{key}"] / wsum
+    mean_true = totals[f"sum_true_{key}"] / wsum
+    var_pred = max(totals[f"sum_pred_sq_{key}"] / wsum - mean_pred * mean_pred, 0.0)
+    var_true = max(totals[f"sum_true_sq_{key}"] / wsum - mean_true * mean_true, 0.0)
+    cov = totals[f"sum_cross_{key}"] / wsum - mean_pred * mean_true
+    denom = math.sqrt(var_pred * var_true)
+    return cov / denom if denom > 1e-12 else 0.0
 
 
 def _finalize_metrics(
@@ -198,24 +215,13 @@ def _finalize_metrics(
     counts: dict[str, int],
     *,
     mate_threshold: float,
-    exclude_mate_from_loss: bool = False,
 ) -> dict[str, float]:
-    def _corr(key: str) -> float:
-        n = counts.get(key, 0)
-        if n == 0:
-            return math.nan
-        mean_pred = totals[f"sum_pred_{key}"] / n
-        mean_true = totals[f"sum_true_{key}"] / n
-        var_pred = max(totals[f"sum_pred_sq_{key}"] / n - mean_pred * mean_pred, 0.0)
-        var_true = max(totals[f"sum_true_sq_{key}"] / n - mean_true * mean_true, 0.0)
-        cov = totals[f"sum_cross_{key}"] / n - mean_pred * mean_true
-        denom = math.sqrt(var_pred * var_true)
-        return cov / denom if denom > 1e-12 else 0.0
-
-    n_all = counts.get("all", 0)
     n_quiet = counts.get("quiet", 0)
-    n_mate = max(n_all - n_quiet, 0)
-    if n_all == 0:
+    n_mate = counts.get("mate", 0)
+    weight_all = totals.get("weight_all", 0.0)
+    weight_quiet = totals.get("weight_quiet", 0.0)
+
+    if weight_all <= 0:
         return {
             "loss": math.inf,
             "mse_loss": math.inf,
@@ -234,23 +240,19 @@ def _finalize_metrics(
             "mate_threshold": mate_threshold,
         }
 
-    use_quiet_loss = exclude_mate_from_loss and n_quiet > 0
-    loss_key = "quiet" if use_quiet_loss else "all"
-    n_loss = counts[loss_key]
-
     return {
-        "loss": totals[f"loss_{loss_key}"] / n_loss,
-        "mse_loss": totals[f"mse_{loss_key}"] / n_loss,
-        "rank_loss": totals[f"rank_{loss_key}"] / n_loss,
-        "mae_norm": totals[f"abs_norm_{loss_key}"] / n_loss,
-        "rmse_norm": math.sqrt(totals[f"sq_norm_{loss_key}"] / n_loss),
-        "mae_vl": totals["abs_vl_all"] / n_all,
-        "corr_vl": _corr("all"),
-        "loss_quiet": totals["loss_quiet"] / max(n_quiet, 1) if n_quiet else math.inf,
-        "mae_norm_quiet": totals["abs_norm_quiet"] / max(n_quiet, 1) if n_quiet else math.inf,
-        "rmse_norm_quiet": math.sqrt(totals["sq_norm_quiet"] / max(n_quiet, 1)) if n_quiet else math.inf,
-        "mae_vl_quiet": totals["abs_vl_quiet"] / max(n_quiet, 1) if n_quiet else math.inf,
-        "corr_vl_quiet": _corr("quiet") if n_quiet else math.nan,
+        "loss": totals["loss_all"] / weight_all,
+        "mse_loss": totals["mse_quiet"] / max(weight_quiet, 1e-12),
+        "rank_loss": totals["rank_all"] / weight_all,
+        "mae_norm": totals["abs_norm_quiet"] / max(weight_quiet, 1e-12),
+        "rmse_norm": math.sqrt(totals["sq_norm_quiet"] / max(weight_quiet, 1e-12)),
+        "mae_vl": totals["abs_vl_quiet"] / max(weight_quiet, 1e-12),
+        "corr_vl": _weighted_corr(totals, "quiet"),
+        "loss_quiet": totals["loss_all"] / weight_all,
+        "mae_norm_quiet": totals["abs_norm_quiet"] / max(weight_quiet, 1e-12),
+        "rmse_norm_quiet": math.sqrt(totals["sq_norm_quiet"] / max(weight_quiet, 1e-12)),
+        "mae_vl_quiet": totals["abs_vl_quiet"] / max(weight_quiet, 1e-12),
+        "corr_vl_quiet": _weighted_corr(totals, "quiet"),
         "n_mate": n_mate,
         "n_quiet": n_quiet,
         "mate_threshold": mate_threshold,
@@ -268,7 +270,6 @@ def evaluate(
     mate_threshold: float = DEFAULT_MATE_THRESHOLD,
     desc: str = "val",
     use_tqdm: bool = True,
-    exclude_mate_from_loss: bool = False,
 ) -> dict[str, float]:
     import sys
 
@@ -277,19 +278,12 @@ def evaluate(
 
     model.eval()
     totals: dict[str, float] = {k: 0.0 for k in (
-        "loss_all", "loss_quiet",
-        "mse_all", "mse_quiet",
-        "rank_all", "rank_quiet",
-        "abs_norm_all", "abs_norm_quiet",
-        "sq_norm_all", "sq_norm_quiet",
-        "abs_vl_all", "abs_vl_quiet",
-        "sum_pred_all", "sum_pred_quiet",
-        "sum_true_all", "sum_true_quiet",
-        "sum_pred_sq_all", "sum_pred_sq_quiet",
-        "sum_true_sq_all", "sum_true_sq_quiet",
-        "sum_cross_all", "sum_cross_quiet",
+        "loss_all", "mse_quiet", "rank_all", "weight_all", "weight_quiet",
+        "abs_norm_quiet", "sq_norm_quiet", "abs_vl_quiet",
+        "sum_pred_quiet", "sum_true_quiet",
+        "sum_pred_sq_quiet", "sum_true_sq_quiet", "sum_cross_quiet",
     )}
-    counts = {"all": 0, "quiet": 0}
+    counts: dict[str, int] = {"all": 0, "quiet": 0, "mate": 0}
 
     non_blocking = device.type == "cuda"
     batch_iter = (
@@ -307,12 +301,13 @@ def evaluate(
 
     try:
         with torch.no_grad():
-            for indices, offsets, targets_norm, targets_raw, is_mate in batch_iter:
+            for indices, offsets, targets_norm, targets_raw, is_mate, loss_weights in batch_iter:
                 indices = indices.to(device, non_blocking=non_blocking)
                 offsets = offsets.to(device, non_blocking=non_blocking)
                 targets_norm = targets_norm.to(device, non_blocking=non_blocking)
                 targets_raw = targets_raw.to(device, non_blocking=non_blocking)
                 is_mate = is_mate.to(device, non_blocking=non_blocking)
+                loss_weights = loss_weights.to(device, non_blocking=non_blocking)
 
                 preds_norm = model(indices, offsets)
                 preds_vl = preds_norm * label_std + label_mean
@@ -322,6 +317,7 @@ def evaluate(
                     targets_norm=targets_norm,
                     targets_raw=targets_raw,
                     is_mate=is_mate,
+                    loss_weights=loss_weights,
                     loss_cfg=loss_cfg,
                     totals=totals,
                     counts=counts,
@@ -334,7 +330,6 @@ def evaluate(
         totals,
         counts,
         mate_threshold=mate_threshold,
-        exclude_mate_from_loss=exclude_mate_from_loss,
     )
 
 
@@ -377,7 +372,6 @@ def train_epoch(
     epoch: int,
     max_epochs: int,
     use_tqdm: bool = True,
-    exclude_mate_from_loss: bool = False,
 ) -> float:
     import sys
 
@@ -401,26 +395,23 @@ def train_epoch(
     )
 
     try:
-        for indices, offsets, targets_norm, _targets_raw, is_mate in batch_iter:
+        for indices, offsets, targets_norm, _targets_raw, is_mate, loss_weights in batch_iter:
             indices = indices.to(device, non_blocking=non_blocking)
             offsets = offsets.to(device, non_blocking=non_blocking)
             targets_norm = targets_norm.to(device, non_blocking=non_blocking)
             is_mate = is_mate.to(device, non_blocking=non_blocking)
+            loss_weights = loss_weights.to(device, non_blocking=non_blocking)
 
             optimizer.zero_grad(set_to_none=True)
             preds = model(indices, offsets)
-            quiet = ~is_mate if exclude_mate_from_loss else None
-            loss, _, _ = _batch_loss(preds, targets_norm, loss_cfg, mask=quiet)
+            loss, _, _ = _batch_loss(preds, targets_norm, loss_weights, is_mate, loss_cfg)
             loss.backward()
             optimizer.step()
 
-            if exclude_mate_from_loss:
-                bs = int((~is_mate).sum().item())
-            else:
-                bs = targets_norm.size(0)
-            if bs > 0:
-                total_loss += loss.item() * bs
-                n += bs
+            batch_weight = float(loss_weights.sum().item())
+            if batch_weight > 0:
+                total_loss += loss.item() * batch_weight
+                n += batch_weight
 
             if use_tqdm and isinstance(batch_iter, tqdm):
                 batch_iter.set_postfix(
@@ -522,8 +513,9 @@ def main() -> None:
         )
     else:
         print("[data] quiet_only=false: keeping all samples (in-check / mate / unstable PST)", flush=True)
-    exclude_mate_from_zscore = bool(data_cfg.get("mate_exclude_from_zscore", False))
-    exclude_mate_from_loss = bool(train_cfg.get("mate_exclude_from_loss", False))
+    exclude_mate_from_zscore = bool(
+        data_cfg.get("mate_exclude_from_zscore", not quiet_only)
+    )
 
     if mate_remap:
         train_mate_before, _ = count_mate_labels(train_samples, mate_threshold=mate_threshold)
@@ -544,7 +536,6 @@ def main() -> None:
             flush=True,
         )
         exclude_mate_from_zscore = False
-        exclude_mate_from_loss = False
 
     train_mate, train_quiet = count_mate_labels(train_samples, mate_threshold=mate_threshold)
     val_mate, val_quiet = count_mate_labels(val_samples, mate_threshold=mate_threshold)
@@ -559,7 +550,8 @@ def main() -> None:
     )
     print(
         f"[label] mate handling: quiet_only={quiet_only}  remap={mate_remap}  "
-        f"zscore_exclude={exclude_mate_from_zscore}  loss_exclude={exclude_mate_from_loss}",
+        f"zscore_exclude={exclude_mate_from_zscore}  "
+        f"loss=quiet(MSE+rank)+mate(rank-only)",
         flush=True,
     )
     print("[label]               inference: pure NNUE when loaded, else pure PST", flush=True)
@@ -573,6 +565,23 @@ def main() -> None:
     scope = "quiet-only" if exclude_mate_from_zscore else "all"
     print(f"[label] z-score mean={label_mean:.4f}  std={label_std:.4f}  ({scope})", flush=True)
 
+    if "val_ratio" in data_cfg:
+        pool_total_before = sum(s.orig_count for s in train_samples) + sum(
+            s.orig_count for s in val_samples
+        )
+        train_pool_before = pool_total_before
+        val_pool_before = pool_total_before
+    else:
+        train_pool_before = sum(s.orig_count for s in train_samples)
+        val_pool_before = sum(s.orig_count for s in val_samples)
+        pool_total_before = train_pool_before + val_pool_before
+
+    print(
+        f"[data] loss weights: sqrt(orig_count / pool_before)  "
+        f"train={train_pool_before:,}  val={val_pool_before:,}",
+        flush=True,
+    )
+
     precompute = bool(train_cfg.get("precompute_features", use_cuda))
     feature_workers = train_cfg.get("feature_workers", data_cfg.get("load_workers", "auto"))
     if precompute:
@@ -583,12 +592,14 @@ def main() -> None:
             label_mean=label_mean,
             label_std=label_std,
             mate_threshold=mate_threshold,
+            pool_total_before=train_pool_before,
         )
         val_ds = pack_precomputed_dataset(
             val_samples,
             label_mean=label_mean,
             label_std=label_std,
             mate_threshold=mate_threshold,
+            pool_total_before=val_pool_before,
         )
         del train_samples, val_samples
     else:
@@ -597,12 +608,14 @@ def main() -> None:
             label_mean=label_mean,
             label_std=label_std,
             mate_threshold=mate_threshold,
+            pool_total_before=train_pool_before,
         )
         val_ds = NnueDataset(
             val_samples,
             label_mean=label_mean,
             label_std=label_std,
             mate_threshold=mate_threshold,
+            pool_total_before=val_pool_before,
         )
 
     num_workers, num_workers_label = resolve_train_workers(
@@ -654,9 +667,9 @@ def main() -> None:
     loss_cfg = parse_loss_config(train_cfg)
     if loss_cfg.use_ranking:
         log_train(
-            f"[loss] {loss_cfg.mse_weight:.2f} * MSE + "
-            f"{loss_cfg.ranking_weight:.2f} * ranking  "
-            f"(max_pairs={loss_cfg.ranking_max_pairs})"
+            f"[loss] quiet: {loss_cfg.mse_weight:.2f}*MSE + {loss_cfg.ranking_weight:.2f}*rank  "
+            f"mate: {loss_cfg.ranking_weight:.2f}*rank-only  "
+            f"(max_pairs={loss_cfg.ranking_max_pairs}, dedupe-weighted)"
         )
     else:
         log_train(f"[loss] pure MSE (ranking_weight=0)")
@@ -686,7 +699,6 @@ def main() -> None:
             epoch=epoch,
             max_epochs=max_epochs,
             use_tqdm=use_tqdm,
-            exclude_mate_from_loss=exclude_mate_from_loss,
         )
         val_metrics = evaluate(
             model,
@@ -698,7 +710,6 @@ def main() -> None:
             mate_threshold=mate_threshold,
             desc=f"val {epoch}/{max_epochs}",
             use_tqdm=use_tqdm,
-            exclude_mate_from_loss=exclude_mate_from_loss,
         )
         val_loss = val_metrics["loss"]
         epoch_elapsed = time.time() - epoch_t0

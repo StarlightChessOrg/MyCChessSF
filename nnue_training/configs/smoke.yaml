@@ -3,10 +3,11 @@ data:
   pattern: "worker_*/chunk_*.txt"
   val_workers: [30, 31]
   dedupe_fen: true
-  quiet_only: true
+  quiet_only: false
   quiet_pst_margin: 70
   mate_threshold: 9800
   mate_remap: false
+  mate_exclude_from_zscore: true
 
 model:
   n_features: 1260

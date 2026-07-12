@@ -81,21 +81,24 @@ python train.py --config configs/full_gpu.yaml
 启动后大致经历以下阶段（均有 `[data]` / `[label]` / `[loader]` 日志）：
 
 1. **多进程加载** — 读取 `merged.txt` 或分块文件，校验 FEN
-2. **FEN 去重**（默认 `dedupe_fen: true`）— 按「棋盘 + 行棋方」合并重复局面，同一 FEN 多条 `vl` 取**平均值**
+2. **FEN 去重**（默认 `dedupe_fen: true`）— 按「棋盘 + 行棋方」合并重复局面，同一 FEN 多条 `vl` 取**平均值**；记录合并前的行数 `orig_count`，损失权重 = `sqrt(orig_count / 去重前总行数)`
 3. **划分 train/val** — 按 `val_ratio` 或 `val_workers`
-4. **静态局面过滤**（默认 `quiet_only: true`）— 仅保留：非将杀区、行棋方未被将军、\|搜索分 − PST\| ≤ `quiet_pst_margin`（PST/in_check 来自数据第 3/4 列）
+4. **静态局面过滤**（可选 `quiet_only: true`）— 默认 **关闭**，全量样本参与训练；开启时仅保留静态局面
 5. **将杀分重映射**（`quiet_only: false` 时可选 `mate_remap: true`）— 扫描 quiet 极值，\|vl\| ≥ 9800 改为 ±cap
 6. **z-score 统计** — 对训练集计算 mean/std
 7. **特征预计算**（可选）— 多进程生成 PSQ 稀疏索引
 8. **CSR 打包** — 将特征压成紧凑数组
 9. **训练循环** — 全部样本参与 loss；早停与 best checkpoint 看全量 `val_loss`
 
-损失为 **50% MSE + 50% 排序损失**（默认权重，可配置）：
+损失为 **50% MSE + 50% 排序损失**（默认权重，可配置），并按去重占比加权：
 
-| 分量 | 空间 | 作用 |
-|------|------|------|
-| MSE | z-score 归一化 | 约束预测量级，拟合绝对搜索分 |
-| 排序（RankNet logistic） | 同 z-score 空间 | batch 内随机 pairwise，要求预测分顺序与标签一致 |
+| 分量 | 样本 | 空间 | 作用 |
+|------|------|------|------|
+| MSE | 非将杀（quiet） | z-score | 约束预测量级 |
+| 排序（RankNet logistic） | **全部** | z-score | batch 内 pairwise，改善相对顺序 |
+| 将杀（\|vl\|≥阈值） | 仅排序 | z-score | 不参与 MSE，不参与 corr 统计 |
+
+**去重损失权重**：`loss_weight = sqrt(orig_count / 去重前总行数)`（`orig_count` 为合并到该 FEN 的原始行数）。相比线性占比，sqrt 可减弱高频 FEN 的主导，使权重更均衡。全局去重后再划分 train/val 时，分母为**整个数据池**去重前的行数。
 
 配置项（`train` 段）：
 
@@ -111,7 +114,7 @@ python train.py --config configs/full_gpu.yaml
 
 | 配置 | 默认 | 说明 |
 |------|------|------|
-| `data.quiet_only` | `true` | 仅保留静态局面；关闭则保留全部样本 |
+| `data.quiet_only` | `false` | 默认保留全量样本；`true` 时仅静态局面 |
 | `data.quiet_pst_margin` | `70` | 保留条件：\|vl − PST\| ≤ 此值（cp） |
 | `data.mate_threshold` | `9800` | \|vl\| ≥ 此值视为将杀带并**丢弃**（非 remap） |
 
@@ -180,8 +183,8 @@ epoch 汇总通过 `tqdm.write` 输出，不与进度条抢行。
 | `val_rank` | 归一化 | 验证集排序损失分量（启用排序时打印） | 越小越好 |
 | `val_mae_norm` | 归一化 | 验证集平均绝对误差 `\|pred_norm - target_norm\|` | 越小越好 |
 | `val_rmse_norm` | 归一化 | 验证集 RMSE | 越小越好 |
-| `val_mae_vl` | 原始 vl | 将预测还原为 `pred_vl = pred_norm * std + mean` 后的 MAE（单位：搜索分） | 越小越好；典型数百～数千 cp 视 std 而定 |
-| `val_corr_vl` | 原始 vl | 预测分与标签搜索分的 Pearson 相关系数 | 越接近 1 越好；>0.9 通常表示拟合较好 |
+| `val_mae_vl` | 原始 vl | quiet 子集加权 MAE | 越小越好 |
+| `val_corr_vl` | 原始 vl | quiet 子集 Pearson 相关（**不含将杀**） | 越接近 1 越好 |
 
 还原公式（与 `train.py` / checkpoint 一致）：
 
