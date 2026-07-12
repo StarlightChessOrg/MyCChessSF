@@ -44,11 +44,7 @@ def fen_dedupe_key(fen: str) -> str:
     return f"{parts[0]} {parts[1]}"
 
 
-def dedupe_samples_by_fen(samples: list[Sample]) -> tuple[list[Sample], dict[str, int]]:
-    """Merge duplicate positions; keep the median ``vl`` per FEN key."""
-    if not samples:
-        return [], {"before": 0, "after": 0, "removed": 0, "groups_merged": 0}
-
+def _dedupe_group_chunk(samples: list[Sample]) -> dict[str, tuple[str, list[float]]]:
     groups: dict[str, tuple[str, list[float]]] = {}
     for sample in samples:
         key = fen_dedupe_key(sample.fen)
@@ -57,15 +53,92 @@ def dedupe_samples_by_fen(samples: list[Sample]) -> tuple[list[Sample], dict[str
         else:
             fen, values = groups[key]
             values.append(sample.vl)
+    return groups
 
+
+def _merge_dedupe_groups(
+    groups: dict[str, tuple[str, list[float]]],
+    chunk: dict[str, tuple[str, list[float]]],
+) -> None:
+    for key, (fen, values) in chunk.items():
+        if key not in groups:
+            groups[key] = (fen, values)
+        else:
+            groups[key][1].extend(values)
+
+
+def _finalize_dedupe_groups(
+    groups: dict[str, tuple[str, list[float]]],
+    *,
+    progress_every: int = 500_000,
+) -> tuple[list[Sample], int]:
     deduped: list[Sample] = []
     groups_merged = 0
-    for fen, values in groups.values():
+    total = len(groups)
+    for index, (fen, values) in enumerate(groups.values(), start=1):
         if len(values) > 1:
             groups_merged += 1
         deduped.append(Sample(fen=fen, vl=float(np.median(values))))
+        if progress_every > 0 and index % progress_every == 0:
+            print(
+                f"[data]   dedupe finalize {index:,}/{total:,} unique FEN",
+                flush=True,
+            )
+    return deduped, groups_merged
+
+
+def dedupe_samples_by_fen(
+    samples: list[Sample],
+    *,
+    load_workers: object = 1,
+    progress_every: int = 1_000_000,
+) -> tuple[list[Sample], dict[str, int]]:
+    """Merge duplicate positions; keep the median ``vl`` per FEN key."""
+    if not samples:
+        return [], {"before": 0, "after": 0, "removed": 0, "groups_merged": 0}
 
     before = len(samples)
+    workers, workers_label = parse_worker_count(load_workers, default_auto=False)
+    print(
+        f"[data] dedupe: grouping {before:,} samples (workers={workers_label}) ...",
+        flush=True,
+    )
+
+    groups: dict[str, tuple[str, list[float]]] = {}
+    if workers <= 1 or before < 200_000:
+        for index, sample in enumerate(samples, start=1):
+            key = fen_dedupe_key(sample.fen)
+            if key not in groups:
+                groups[key] = (sample.fen, [sample.vl])
+            else:
+                groups[key][1].append(sample.vl)
+            if progress_every > 0 and index % progress_every == 0:
+                print(
+                    f"[data]   dedupe grouped {index:,}/{before:,}  "
+                    f"unique={len(groups):,}",
+                    flush=True,
+                )
+    else:
+        chunk_size = max(100_000, before // (workers * 4))
+        chunks = [samples[i : i + chunk_size] for i in range(0, before, chunk_size)]
+        print(
+            f"[data]   dedupe parallel: {len(chunks)} chunk(s), {workers} worker(s)",
+            flush=True,
+        )
+        completed = 0
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(_dedupe_group_chunk, chunk) for chunk in chunks]
+            for future in as_completed(futures):
+                _merge_dedupe_groups(groups, future.result())
+                completed += 1
+                print(
+                    f"[data]   dedupe merged chunk {completed}/{len(chunks)}  "
+                    f"unique={len(groups):,}",
+                    flush=True,
+                )
+
+    print(f"[data]   dedupe computing median for {len(groups):,} unique FEN ...", flush=True)
+    deduped, groups_merged = _finalize_dedupe_groups(groups, progress_every=progress_every)
     after = len(deduped)
     return deduped, {
         "before": before,
@@ -521,8 +594,8 @@ def split_samples(
         train_set, val_set, skipped = _split_files_parallel(files, val_ids, load_workers=workers)
 
     if dedupe_fen:
-        train_set, train_stats = dedupe_samples_by_fen(train_set)
-        val_set, val_stats = dedupe_samples_by_fen(val_set)
+        train_set, train_stats = dedupe_samples_by_fen(train_set, load_workers=load_workers)
+        val_set, val_stats = dedupe_samples_by_fen(val_set, load_workers=load_workers)
         print(
             f"[data] dedupe train: {train_stats['before']:,} -> {train_stats['after']:,} "
             f"(removed {train_stats['removed']:,}, merged {train_stats['groups_merged']:,})",
@@ -555,7 +628,7 @@ def split_samples_by_ratio(
         raise ValueError(f"No samples found under {source} with pattern {pattern!r}")
 
     if dedupe_fen:
-        samples, stats = dedupe_samples_by_fen(samples)
+        samples, stats = dedupe_samples_by_fen(samples, load_workers=load_workers)
         print(
             f"[data] dedupe: {stats['before']:,} -> {stats['after']:,} unique FEN "
             f"(removed {stats['removed']:,}, merged {stats['groups_merged']:,} groups)",
@@ -564,14 +637,11 @@ def split_samples_by_ratio(
 
     print(f"[data] shuffling {len(samples):,} samples ...", flush=True)
     rng = random.Random(seed)
-    indices = list(range(len(samples)))
-    rng.shuffle(indices)
+    rng.shuffle(samples)
     n_val = max(1, int(len(samples) * val_ratio))
-    val_indices = set(indices[:n_val])
-
-    print(f"[data] splitting train/val (val={n_val:,}) ...", flush=True)
-    train_set = [samples[i] for i in range(len(samples)) if i not in val_indices]
-    val_set = [samples[i] for i in range(len(samples)) if i in val_indices]
+    val_set = samples[:n_val]
+    train_set = samples[n_val:]
+    print(f"[data] split train={len(train_set):,}  val={len(val_set):,}", flush=True)
     return train_set, val_set, skipped
 
 
