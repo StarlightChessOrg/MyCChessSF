@@ -361,7 +361,7 @@ struct ChunkWriter {
       std::perror(current_path.c_str());
       return false;
     }
-    # Line buffering: flush on each "FEN\\tsearch\\tpst\\tin_check\\n" so partial chunks survive crashes.
+    // Line buffering: flush on each "FEN\\tsearch\\tpst\\tin_check\\n" so partial chunks survive crashes.
     setvbuf(fp, io_buf.data(), _IOLBF, io_buf.size());
     chunk_written = 0;
     ++chunks_opened;
