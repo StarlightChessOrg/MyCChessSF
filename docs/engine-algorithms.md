@@ -7,7 +7,7 @@
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  SearchMain / SearchRoot / SearchFull / SearchQuiesc        │
-│    Alpha-Beta + TT +  aspiration + LMR + 剪枝扩展            │
+│    Alpha-Beta + TT + aspiration + LMR + 空着/IID/Singular      │
 └───────────────────────────┬─────────────────────────────────┘
                             │ 静态评估
               ┌─────────────┴─────────────┐
@@ -22,7 +22,7 @@
 
 | 层次 | 实现位置 | 要点 |
 |------|----------|------|
-| 搜索 | `cpp/inc/xqwl_search.inc` | 小巫师 Alpha-Beta 骨架 + 现代剪枝扩展 |
+| 搜索 | `cpp/inc/xqwl_search.inc` | 小巫师 Alpha-Beta 骨架 + LMR / 空着 / IID |
 | NNUE | `cpp/inc/xqwl_nnue.inc` | XQWL-PSQ、单视角 FT 增量、SIMD FC |
 | PST | `cpp/inc/xqwl_preeval.inc` | 动态中残局 PST 混合 |
 | 规则核 | `cpp/inc/xqwl_extract.inc` | 走法生成、Zobrist、重复局面 |
@@ -146,39 +146,6 @@ enum class XqwlEvalMode { Raw, Full };
 ### SIMD 后端
 
 运行时派发：Scalar / NEON / AVX2 / AVX512-VNNI。热路径：`acc_add_column`（FT 增量）、`dot_i8_u8`（FC int8 点积）。
-
----
-
-## staticEval 驱动剪枝（第二梯队）
-
-在 TT 缓存静态分的基础上，引入与 **Pikafish / Stockfish 同类思路** 的轻量剪枝（针对中国象棋尺度调参，**保守配置** 以避免 NNUE 静态分噪声导致漏看战术着法）。常量见 `xqwl_portable_prefix.h` 中 `FUTILITY_*` / `RAZOR_*` 等。
-
-辅助启发：
-
-| 标志 | 定义 |
-|------|------|
-| **improving** | `staticEval[ply] > staticEval[ply-2]`（同方视角） |
-| **opponentWorsening** | `staticEval[ply] > -staticEval[ply-1]` |
-
-### SearchFull
-
-| 剪枝 | 条件摘要 | 行为 |
-|------|----------|------|
-| **Razoring** | 非将、`nDepth ≤ 2`、`sEval + margin < alpha` | 直接进入 QSearch |
-| **Reverse futility** | 非将、**`nDepth ≤ 3`**（独立上限，勿与 quiet futility 混用）、`sEval - margin ≥ beta` | 返回静态分 |
-| **Null-move 门控** | 仅当 `sEval >= beta - margin` | 否则跳过空着尝试 |
-| **Quiet futility** | 非吃、**已尝试 ≥4 个安静着**、剩余扩展深度 ≤2 | 跳过该安静着 |
-| **LMP** | 非吃、**`nDepth ≥ 4`**、着法序号 ≥ 阈值 | 跳过后期安静着 |
-
-### SearchQuiesc
-
-| 剪枝 | 条件摘要 |
-|------|----------|
-| **Capture futility** | 停着分 + 被吃子估值 + margin ≤ alpha 时跳过该吃子 |
-
-**安全边界**：将杀区（`|score| > WIN_VALUE`）内不启用上述剪枝，避免漏杀。
-
-**校核说明（2026）**：初版将 reverse futility 误用 `FUTILITY_MAX_DEPTH=6`，在较深层直接返回 NNUE 静态分，易产生「看着合理、实际荒诞」的着法；已改为 `REVERSE_FUT_MAX_DEPTH=3` 并整体降低 margin / 缩小 LMP 范围。
 
 ---
 
