@@ -179,7 +179,7 @@ async function clickStartPlay(driver) {
 }
 
 async function syncWebBoardFromPage(driver) {
-  webLastBoard = await getWebBoard(driver)
+  webLastBoard = await readWebBoard(driver)
   console.log("[auto] 已从网页同步棋盘状态")
 }
 
@@ -215,9 +215,67 @@ async function performMoveClick(driver, start, end) {
     )
   }
   await sleep(150)
-  await driver.actions().move({ origin: start, x: 0, y: 0 }).click().perform()
-  await sleep(300)
-  await driver.actions().move({ origin: end, x: 0, y: 0 }).click().perform()
+  await dispatchPointerClick(driver, start)
+  await sleep(350)
+  await dispatchPointerClick(driver, end)
+}
+
+async function dispatchPointerClick(driver, el) {
+  try {
+    await driver.actions().move({ origin: el, x: 0, y: 0 }).click().perform()
+    return
+  } catch {
+    /* fallback below */
+  }
+  await driver.executeScript(
+    `const el = arguments[0];
+     const box = el.getBoundingClientRect();
+     const opts = {
+       bubbles: true, cancelable: true, view: window,
+       clientX: box.left + box.width / 2,
+       clientY: box.top + box.height / 2,
+     };
+     for (const t of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+       el.dispatchEvent(new MouseEvent(t, opts));
+     }`,
+    el
+  )
+}
+
+/** bridge4 y1x1y2x2 → 相弈 DOM：grid 行 10-x，列 y+1；棋子属性 r=x+1, c=y+1 */
+function bridgeToSite(x1, y1, x2, y2) {
+  return {
+    from: { iccsX: x1, iccsY: y1, gridRow: 10 - x1, gridCol: y1 + 1, r: x1 + 1, c: y1 + 1 },
+    to: { iccsX: x2, iccsY: y2, gridRow: 10 - x2, gridCol: y2 + 1, r: x2 + 1, c: y2 + 1 },
+  }
+}
+
+async function findPieceAtSite(driver, r, c) {
+  const xpaths = [
+    `//div[contains(@class,'pieces-container')]//div[@r='${r}' and @c='${c}']`,
+    `//div[contains(@class,'pieces-container')]//div[@r='${r}' and @c='${c}']//div[contains(@class,'piece')]`,
+    `//div[contains(@class,'pieces-container')]//*[@r='${r}' and @c='${c}']`,
+  ]
+  for (const xp of xpaths) {
+    try {
+      const el = await driver.findElement(By.xpath(xp))
+      if (await el.isDisplayed()) {
+        console.log(`[auto] 棋子 r=${r} c=${c}`)
+        return el
+      }
+    } catch {
+      /* try next */
+    }
+  }
+  return null
+}
+
+async function findMoveTarget(driver, site, preferPiece) {
+  if (preferPiece) {
+    const piece = await findPieceAtSite(driver, site.r, site.c)
+    if (piece) return piece
+  }
+  return findGridSquare(driver, site.gridRow, site.gridCol, preferPiece)
 }
 
 async function waitForComputerSetupUi(driver, timeoutMs = 90000) {
@@ -363,14 +421,14 @@ async function getEngineMove(driver) {
     }
 
     const waitBoardChange = async () => {
-      const currentBoard = await getWebBoard(driver)
+      const currentBoard = await readWebBoard(driver)
       if (currentBoard.toString() !== webLastBoard.toString()) return
       await sleep(200)
       await waitBoardChange()
     }
     await waitBoardChange()
 
-    const currentBoard = await getWebBoard(driver)
+    const currentBoard = await readWebBoard(driver)
     const move = await getWebMove(driver, webLastBoard, currentBoard)
     console.log("[auto] 相弈应手", move)
     webLastBoard = currentBoard
@@ -388,13 +446,10 @@ async function doMoveOnWeb(driver, attempt = 0) {
   const y1 = Number(engineLastMove.charAt(0))
   const x2 = Number(engineLastMove.charAt(3))
   const y2 = Number(engineLastMove.charAt(2))
-  const _x1 = 10 - x1
-  const _y1 = y1 + 1
-  const _x2 = 10 - x2
-  const _y2 = y2 + 1
+  const { from, to } = bridgeToSite(x1, y1, x2, y2)
 
   console.log(
-    `[auto] 网页走子 grid (${_x1},${_y1})->(${_x2},${_y2}) bridge=${engineLastMove} attempt=${attempt + 1}`
+    `[auto] 网页走子 ICCS (${x1},${y1})->(${x2},${y2})  grid (${from.gridRow},${from.gridCol})->(${to.gridRow},${to.gridCol})  r/c (${from.r},${from.c})->(${to.r},${to.c})  bridge=${engineLastMove} attempt=${attempt + 1}`
   )
 
   if (attempt >= MAX_ATTEMPTS) {
@@ -407,8 +462,8 @@ async function doMoveOnWeb(driver, attempt = 0) {
   let start
   let end
   try {
-    start = await findGridSquare(driver, _x1, _y1, true)
-    end = await findGridSquare(driver, _x2, _y2, false)
+    start = await findMoveTarget(driver, from, true)
+    end = await findMoveTarget(driver, to, false)
   } catch (err) {
     webLastBoard[9 - x1][y1] = 1
     webLastBoard[9 - x2][y2] = 0
@@ -417,29 +472,53 @@ async function doMoveOnWeb(driver, attempt = 0) {
     return doMoveOnWeb(driver, attempt + 1)
   }
 
-  await driver.executeScript("arguments[0].style.border='3px solid red';", start)
-  await driver.executeScript("arguments[0].style.border='3px solid red';", end)
+  await driver.executeScript("arguments[0].style.outline='3px solid red';", start)
+  await driver.executeScript("arguments[0].style.outline='3px solid orange';", end)
 
   try {
     await performMoveClick(driver, start, end)
   } catch (err) {
-    console.warn("[auto] 元素点击失败，尝试 JS click:", err.message || err)
-    await driver.executeScript("arguments[0].click();", start)
+    console.warn("[auto] 指针点击失败，尝试 JS click:", err.message || err)
+    await dispatchPointerClick(driver, start)
     await sleep(250)
-    await driver.executeScript("arguments[0].click();", end)
+    await dispatchPointerClick(driver, end)
   }
 
-  await driver.executeScript("arguments[0].style.border='';", start)
-  await driver.executeScript("arguments[0].style.border='';", end)
-  await sleep(300)
+  await driver.executeScript("arguments[0].style.outline='';", start)
+  await driver.executeScript("arguments[0].style.outline='';", end)
+  await sleep(400)
 
-  if ((await getWebBoard(driver)).toString() !== webLastBoard.toString()) {
+  if ((await readWebBoard(driver)).toString() !== webLastBoard.toString()) {
     webLastBoard[9 - x1][y1] = 1
     webLastBoard[9 - x2][y2] = 0
     console.error("[auto] 网页着法失败，重试")
     await sleep(400)
     return doMoveOnWeb(driver, attempt + 1)
   }
+}
+
+async function getWebBoardFromPieces(driver) {
+  const board = Array.from({ length: 10 }, () => Array(9).fill(0))
+  const pieces = await driver.findElements(
+    By.css(".pieces-container > div[r], .pieces-container > div[data-r]")
+  )
+  if (pieces.length === 0) return null
+  for (const el of pieces) {
+    const r = Number((await el.getAttribute("r")) || (await el.getAttribute("data-r")))
+    const c = Number((await el.getAttribute("c")) || (await el.getAttribute("data-c")))
+    if (!Number.isFinite(r) || !Number.isFinite(c)) continue
+    const gridRow = 11 - r
+    if (gridRow >= 1 && gridRow <= 10 && c >= 1 && c <= 9) {
+      board[gridRow - 1][c - 1] = 1
+    }
+  }
+  return board
+}
+
+async function readWebBoard(driver) {
+  const fromPieces = await getWebBoardFromPieces(driver)
+  if (fromPieces) return fromPieces
+  return getWebBoard(driver)
 }
 
 async function getWebBoard(driver) {
@@ -523,7 +602,7 @@ async function initDriver() {
     "--no-first-run",
     "--no-default-browser-check",
     "--remote-allow-origins=*",
-    "--window-size=1280,900",
+    "--start-maximized",
   ]
   if (USE_SYSTEM_EDGE_PROFILE) {
     args.push("--profile-directory=Default")
