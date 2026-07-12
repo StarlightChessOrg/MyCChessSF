@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
 from data.dataset import (
     DEFAULT_DATA_PATTERN,
     NnueDataset,
+    apply_mate_label_remap,
     compute_zscore_stats,
     count_mate_labels,
     make_dataloader,
@@ -65,9 +66,14 @@ def format_epoch_summary(
         f"  val_mae_quiet {val_metrics['mae_vl_quiet']:.2f}",
         f"  val_corr_quiet {val_metrics['corr_vl_quiet']:.4f}  "
         f"(n={val_metrics['n_quiet']:,})",
-        f"  val_mate      skipped n={val_metrics['n_mate']:,}",
-        f"                (|vl|>={val_metrics['mate_threshold']:.0f})",
     ]
+    if val_metrics.get("n_mate", 0) > 0:
+        lines.extend(
+            [
+                f"  val_mate      skipped n={val_metrics['n_mate']:,}",
+                f"                (|vl|>={val_metrics['mate_threshold']:.0f})",
+            ]
+        )
     if is_best:
         prev = "n/a" if not math.isfinite(best_val) else f"{best_val:.6f}"
         lines.append(f"  checkpoint    saved best.pt (prev best {prev})")
@@ -134,7 +140,13 @@ def _accumulate_metrics(
         counts[key] += bs
 
 
-def _finalize_metrics(totals: dict[str, float], counts: dict[str, int], *, mate_threshold: float) -> dict[str, float]:
+def _finalize_metrics(
+    totals: dict[str, float],
+    counts: dict[str, int],
+    *,
+    mate_threshold: float,
+    exclude_mate_from_loss: bool = False,
+) -> dict[str, float]:
     def _corr(key: str) -> float:
         n = counts.get(key, 0)
         if n == 0:
@@ -150,7 +162,7 @@ def _finalize_metrics(totals: dict[str, float], counts: dict[str, int], *, mate_
     n_all = counts.get("all", 0)
     n_quiet = counts.get("quiet", 0)
     n_mate = max(n_all - n_quiet, 0)
-    if n_quiet == 0:
+    if n_all == 0:
         return {
             "loss": math.inf,
             "mae_norm": math.inf,
@@ -167,17 +179,21 @@ def _finalize_metrics(totals: dict[str, float], counts: dict[str, int], *, mate_
             "mate_threshold": mate_threshold,
         }
 
+    use_quiet_loss = exclude_mate_from_loss and n_quiet > 0
+    loss_key = "quiet" if use_quiet_loss else "all"
+    n_loss = counts[loss_key]
+
     return {
-        "loss": totals["loss_quiet"] / n_quiet,
-        "mae_norm": totals["abs_norm_quiet"] / n_quiet,
-        "rmse_norm": math.sqrt(totals["sq_norm_quiet"] / n_quiet),
-        "mae_vl": totals["abs_vl_all"] / max(n_all, 1),
+        "loss": totals[f"loss_{loss_key}"] / n_loss,
+        "mae_norm": totals[f"abs_norm_{loss_key}"] / n_loss,
+        "rmse_norm": math.sqrt(totals[f"sq_norm_{loss_key}"] / n_loss),
+        "mae_vl": totals["abs_vl_all"] / n_all,
         "corr_vl": _corr("all"),
-        "loss_quiet": totals["loss_quiet"] / n_quiet,
-        "mae_norm_quiet": totals["abs_norm_quiet"] / n_quiet,
-        "rmse_norm_quiet": math.sqrt(totals["sq_norm_quiet"] / n_quiet),
-        "mae_vl_quiet": totals["abs_vl_quiet"] / n_quiet,
-        "corr_vl_quiet": _corr("quiet"),
+        "loss_quiet": totals["loss_quiet"] / max(n_quiet, 1) if n_quiet else math.inf,
+        "mae_norm_quiet": totals["abs_norm_quiet"] / max(n_quiet, 1) if n_quiet else math.inf,
+        "rmse_norm_quiet": math.sqrt(totals["sq_norm_quiet"] / max(n_quiet, 1)) if n_quiet else math.inf,
+        "mae_vl_quiet": totals["abs_vl_quiet"] / max(n_quiet, 1) if n_quiet else math.inf,
+        "corr_vl_quiet": _corr("quiet") if n_quiet else math.nan,
         "n_mate": n_mate,
         "n_quiet": n_quiet,
         "mate_threshold": mate_threshold,
@@ -195,6 +211,7 @@ def evaluate(
     mate_threshold: float = DEFAULT_MATE_THRESHOLD,
     desc: str = "val",
     use_tqdm: bool = True,
+    exclude_mate_from_loss: bool = False,
 ) -> dict[str, float]:
     import sys
 
@@ -254,7 +271,12 @@ def evaluate(
         if use_tqdm and isinstance(batch_iter, tqdm):
             batch_iter.close()
 
-    return _finalize_metrics(totals, counts, mate_threshold=mate_threshold)
+    return _finalize_metrics(
+        totals,
+        counts,
+        mate_threshold=mate_threshold,
+        exclude_mate_from_loss=exclude_mate_from_loss,
+    )
 
 
 def save_checkpoint(
@@ -296,7 +318,7 @@ def train_epoch(
     epoch: int,
     max_epochs: int,
     use_tqdm: bool = True,
-    exclude_mate_from_loss: bool = True,
+    exclude_mate_from_loss: bool = False,
 ) -> float:
     import sys
 
@@ -412,8 +434,31 @@ def main() -> None:
     print(f"[data] train={len(train_samples):,}  val={len(val_samples):,}  skipped={skipped:,}", flush=True)
 
     mate_threshold = float(data_cfg.get("mate_threshold", DEFAULT_MATE_THRESHOLD))
-    exclude_mate_from_zscore = bool(data_cfg.get("mate_exclude_from_zscore", True))
-    exclude_mate_from_loss = bool(train_cfg.get("mate_exclude_from_loss", True))
+    mate_remap = bool(data_cfg.get("mate_remap", True))
+    exclude_mate_from_zscore = bool(data_cfg.get("mate_exclude_from_zscore", False))
+    exclude_mate_from_loss = bool(train_cfg.get("mate_exclude_from_loss", False))
+
+    if mate_remap:
+        train_mate_before, _ = count_mate_labels(train_samples, mate_threshold=mate_threshold)
+        val_mate_before, _ = count_mate_labels(val_samples, mate_threshold=mate_threshold)
+        train_samples, val_samples, remap_stats = apply_mate_label_remap(
+            train_samples,
+            val_samples,
+            mate_threshold=mate_threshold,
+        )
+        print(
+            f"[label] mate remap: quiet_min={remap_stats['quiet_min']:.1f}  "
+            f"quiet_max={remap_stats['quiet_max']:.1f}  cap=±{remap_stats['mate_cap']:.1f}",
+            flush=True,
+        )
+        print(
+            f"[label]               remapped train={remap_stats['remapped_train']:,}/"
+            f"{train_mate_before:,}  val={remap_stats['remapped_val']:,}/{val_mate_before:,}",
+            flush=True,
+        )
+        exclude_mate_from_zscore = False
+        exclude_mate_from_loss = False
+
     train_mate, train_quiet = count_mate_labels(train_samples, mate_threshold=mate_threshold)
     val_mate, val_quiet = count_mate_labels(val_samples, mate_threshold=mate_threshold)
     print(
@@ -426,8 +471,8 @@ def main() -> None:
         flush=True,
     )
     print(
-        f"[label] mate handling: zscore_exclude={exclude_mate_from_zscore}  "
-        f"loss_exclude={exclude_mate_from_loss}",
+        f"[label] mate handling: remap={mate_remap}  "
+        f"zscore_exclude={exclude_mate_from_zscore}  loss_exclude={exclude_mate_from_loss}",
         flush=True,
     )
     print("[label]               inference: pure NNUE when loaded, else pure PST", flush=True)
@@ -558,6 +603,7 @@ def main() -> None:
             mate_threshold=mate_threshold,
             desc=f"val {epoch}/{max_epochs}",
             use_tqdm=use_tqdm,
+            exclude_mate_from_loss=exclude_mate_from_loss,
         )
         val_loss = val_metrics["loss"]
         epoch_elapsed = time.time() - epoch_t0

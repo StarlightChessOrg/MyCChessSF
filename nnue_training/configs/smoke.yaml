@@ -4,7 +4,7 @@ data:
   val_workers: [30, 31]
   dedupe_fen: true
   mate_threshold: 9800
-  mate_exclude_from_zscore: true
+  mate_remap: true
 
 model:
   n_features: 1260
@@ -22,5 +22,4 @@ train:
   prefetch_factor: 2
   device: cpu
   checkpoint_dir: checkpoints
-  mate_exclude_from_loss: true
   log_every: 50

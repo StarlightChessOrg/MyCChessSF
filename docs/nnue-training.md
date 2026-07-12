@@ -83,19 +83,21 @@ python train.py --config configs/full_gpu.yaml
 1. **多进程加载** — 读取 `merged.txt` 或分块文件，校验 FEN
 2. **FEN 去重**（默认 `dedupe_fen: true`）— 按「棋盘 + 行棋方」合并重复局面，同一 FEN 多条 `vl` 取**中位数**
 3. **划分 train/val** — 按 `val_ratio` 或 `val_workers`
-4. **z-score 统计** — 默认**仅用非将杀样本**（\|vl\| < 9800）计算 mean/std
-5. **特征预计算**（可选）— 多进程生成 PSQ 稀疏索引
-6. **CSR 打包** — 将特征压成紧凑数组；统计 mate / quiet 样本数
-7. **训练循环** — 将杀样本**不参与 loss**；早停与 best  checkpoint 看 quiet 子集 `val_loss`
+4. **将杀分重映射**（默认 `mate_remap: true`）— 扫描全数据集 quiet 样本的 min/max，\|vl\| ≥ 9800 的样本改为 **±max(\|min\|, \|max\|)**，保留在训练集中
+5. **z-score 统计** — 对重映射后的**全部**样本计算 mean/std
+6. **特征预计算**（可选）— 多进程生成 PSQ 稀疏索引
+7. **CSR 打包** — 将特征压成紧凑数组
+8. **训练循环** — 全部样本参与 loss；早停与 best checkpoint 看全量 `val_loss`
 
-### 将杀分单独处理
+### 将杀分处理
 
 | 配置 | 默认 | 说明 |
 |------|------|------|
 | `data.dedupe_fen` | `true` | 训练前按 FEN 去重；重复 `vl` 取中位数 |
 | `data.mate_threshold` | `9800` | \|vl\| ≥ 此值视为将杀带（与 C++ `WIN_VALUE` 一致） |
-| `data.mate_exclude_from_zscore` | `true` | z-score 的 mean/std 不含将杀样本 |
-| `train.mate_exclude_from_loss` | `true` | 训练/验证 loss 与早停仅统计 quiet 样本 |
+| `data.mate_remap` | `true` | 将杀分钳到 quiet 极值的最大绝对值，不丢弃样本 |
+| `data.mate_exclude_from_zscore` | `false` | 设为 `true` 可回退：z-score 不含将杀（需 `mate_remap: false`） |
+| `train.mate_exclude_from_loss` | `false` | 设为 `true` 可回退：loss 不含将杀（需 `mate_remap: false`） |
 
 推理侧：C++ 搜索加载 NNUE 时使用纯 NNUE 静态分，不与 PST 混合；未加载 NNUE 时使用纯 PST。
 

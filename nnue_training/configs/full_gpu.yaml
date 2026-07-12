@@ -7,7 +7,7 @@ data:
   load_workers: auto
   dedupe_fen: true
   mate_threshold: 9800
-  mate_exclude_from_zscore: true
+  mate_remap: true
 
 model:
   n_features: 1260
@@ -28,4 +28,3 @@ train:
   tqdm: true
   device: cuda
   checkpoint_dir: checkpoints/full_gpu
-  mate_exclude_from_loss: true

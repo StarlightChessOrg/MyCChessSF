@@ -165,11 +165,11 @@ NNUE 加载后搜索评估 **不**读取 PST 分值；PST 与 NNUE 互不混合�
 
 NNUE 监督标签来自 `xqwl_gen_nnue` 根搜索分。训练管线（`nnue_training/labels.py`）对 **\|vl\| ≥ 9800** 的将杀样本：
 
-- 不参与 z-score 统计
-- 不参与 loss
-- quiet 指标单独统计
+- 扫描全数据集 quiet 样本的最低/最高分
+- 将杀分按正负改为 **±max(\|quiet_min\|, \|quiet_max\|)**，保留参与 z-score 与 loss
+- 避免 ±9998 极端值拉偏回归，同时保留胜势/负势局面监督
 
-避免极端将杀分拉偏 NNUE 回归。部署模型见 `data/nnue_model/`。
+部署模型见 `data/nnue_model/`。
 
 ---
 

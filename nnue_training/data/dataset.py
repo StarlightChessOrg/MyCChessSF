@@ -21,7 +21,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from features.xqwl_psq import fen_to_feature_indices
-from labels import DEFAULT_MATE_THRESHOLD, is_mate_label
+from labels import DEFAULT_MATE_THRESHOLD, is_mate_label, quiet_vl_cap, remapped_mate_vl
 from mycchess_sf.fen_parse import parse_fen_board
 
 DEFAULT_DATA_PATTERN = "worker_*/chunk_*.txt"
@@ -575,10 +575,78 @@ def split_samples_by_ratio(
     return train_set, val_set, skipped
 
 
+def compute_quiet_vl_bounds(
+    samples: list[Sample],
+    *,
+    mate_threshold: float = DEFAULT_MATE_THRESHOLD,
+) -> tuple[float, float, float]:
+    """Return ``(quiet_min, quiet_max, mate_cap)`` from non-mate samples."""
+    quiet_vls = [s.vl for s in samples if not is_mate_label(s.vl, threshold=mate_threshold)]
+    if not quiet_vls:
+        raise ValueError("No quiet samples to compute vl bounds")
+    quiet_min = float(min(quiet_vls))
+    quiet_max = float(max(quiet_vls))
+    return quiet_min, quiet_max, quiet_vl_cap(quiet_min=quiet_min, quiet_max=quiet_max)
+
+
+def remap_mate_labels_in_samples(
+    samples: list[Sample],
+    *,
+    mate_cap: float,
+    mate_threshold: float = DEFAULT_MATE_THRESHOLD,
+) -> tuple[list[Sample], int]:
+    remapped = 0
+    out: list[Sample] = []
+    for sample in samples:
+        new_vl = remapped_mate_vl(sample.vl, mate_cap, threshold=mate_threshold)
+        if new_vl != sample.vl:
+            remapped += 1
+            out.append(
+                Sample(
+                    fen=sample.fen,
+                    vl=new_vl,
+                    feat_indices=sample.feat_indices,
+                )
+            )
+        else:
+            out.append(sample)
+    return out, remapped
+
+
+def apply_mate_label_remap(
+    train_samples: list[Sample],
+    val_samples: list[Sample],
+    *,
+    mate_threshold: float = DEFAULT_MATE_THRESHOLD,
+) -> tuple[list[Sample], list[Sample], dict[str, float | int]]:
+    """Scan full dataset quiet extrema, then clamp mate labels to ±cap."""
+    quiet_min, quiet_max, mate_cap = compute_quiet_vl_bounds(
+        train_samples + val_samples,
+        mate_threshold=mate_threshold,
+    )
+    train_out, remapped_train = remap_mate_labels_in_samples(
+        train_samples,
+        mate_cap=mate_cap,
+        mate_threshold=mate_threshold,
+    )
+    val_out, remapped_val = remap_mate_labels_in_samples(
+        val_samples,
+        mate_cap=mate_cap,
+        mate_threshold=mate_threshold,
+    )
+    return train_out, val_out, {
+        "quiet_min": quiet_min,
+        "quiet_max": quiet_max,
+        "mate_cap": mate_cap,
+        "remapped_train": remapped_train,
+        "remapped_val": remapped_val,
+    }
+
+
 def compute_zscore_stats(
     samples: list[Sample],
     *,
-    exclude_mate: bool = True,
+    exclude_mate: bool = False,
     mate_threshold: float = DEFAULT_MATE_THRESHOLD,
 ) -> tuple[float, float]:
     if not samples:
