@@ -81,7 +81,7 @@ python train.py --config configs/full_gpu.yaml
 启动后大致经历以下阶段（均有 `[data]` / `[label]` / `[loader]` 日志）：
 
 1. **多进程加载** — 读取 `merged.txt` 或分块文件，校验 FEN
-2. **FEN 去重**（默认 `dedupe_fen: true`）— 按「棋盘 + 行棋方」合并重复局面，同一 FEN 多条 `vl` 取**中位数**
+2. **FEN 去重**（默认 `dedupe_fen: true`）— 按「棋盘 + 行棋方」合并重复局面，同一 FEN 多条 `vl` 取**平均值**
 3. **划分 train/val** — 按 `val_ratio` 或 `val_workers`
 4. **将杀分重映射**（默认 `mate_remap: true`）— 扫描全数据集 quiet 样本的 min/max，\|vl\| ≥ 9800 的样本改为 **±max(\|min\|, \|max\|)**，保留在训练集中
 5. **z-score 统计** — 对重映射后的**全部**样本计算 mean/std
@@ -93,7 +93,7 @@ python train.py --config configs/full_gpu.yaml
 
 | 配置 | 默认 | 说明 |
 |------|------|------|
-| `data.dedupe_fen` | `true` | 训练前按 FEN 去重；重复 `vl` 取中位数 |
+| `data.dedupe_fen` | `true` | 训练前按 FEN 去重；重复 `vl` 取平均值 |
 | `data.mate_threshold` | `9800` | \|vl\| ≥ 此值视为将杀带（与 C++ `WIN_VALUE` 一致） |
 | `data.mate_remap` | `true` | 将杀分钳到 quiet 极值的最大绝对值，不丢弃样本 |
 | `data.mate_exclude_from_zscore` | `false` | 设为 `true` 可回退：z-score 不含将杀（需 `mate_remap: false`） |

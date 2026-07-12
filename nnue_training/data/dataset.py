@@ -44,44 +44,93 @@ def fen_dedupe_key(fen: str) -> str:
     return f"{parts[0]} {parts[1]}"
 
 
-def _dedupe_group_chunk(samples: list[Sample]) -> dict[str, tuple[str, list[float]]]:
-    groups: dict[str, tuple[str, list[float]]] = {}
+# Accumulator per FEN key: (representative fen, vl_sum, count)
+_DedupeAccum = tuple[str, float, int]
+
+
+def _dedupe_group_chunk(samples: list[Sample]) -> dict[str, _DedupeAccum]:
+    groups: dict[str, _DedupeAccum] = {}
     for sample in samples:
         key = fen_dedupe_key(sample.fen)
         if key not in groups:
-            groups[key] = (sample.fen, [sample.vl])
+            groups[key] = (sample.fen, sample.vl, 1)
         else:
-            fen, values = groups[key]
-            values.append(sample.vl)
+            fen, vl_sum, count = groups[key]
+            groups[key] = (fen, vl_sum + sample.vl, count + 1)
     return groups
 
 
 def _merge_dedupe_groups(
-    groups: dict[str, tuple[str, list[float]]],
-    chunk: dict[str, tuple[str, list[float]]],
+    groups: dict[str, _DedupeAccum],
+    chunk: dict[str, _DedupeAccum],
 ) -> None:
-    for key, (fen, values) in chunk.items():
+    for key, (fen, vl_sum, count) in chunk.items():
         if key not in groups:
-            groups[key] = (fen, values)
+            groups[key] = (fen, vl_sum, count)
         else:
-            groups[key][1].extend(values)
+            prev_fen, prev_sum, prev_count = groups[key]
+            groups[key] = (prev_fen, prev_sum + vl_sum, prev_count + count)
 
 
-def _finalize_dedupe_groups(
-    groups: dict[str, tuple[str, list[float]]],
-    *,
-    progress_every: int = 500_000,
+def _finalize_dedupe_chunk(
+    items: list[tuple[str, _DedupeAccum]],
 ) -> tuple[list[Sample], int]:
     deduped: list[Sample] = []
     groups_merged = 0
-    total = len(groups)
-    for index, (fen, values) in enumerate(groups.values(), start=1):
-        if len(values) > 1:
+    for _key, (fen, vl_sum, count) in items:
+        if count > 1:
             groups_merged += 1
-        deduped.append(Sample(fen=fen, vl=float(np.median(values))))
-        if progress_every > 0 and index % progress_every == 0:
+        deduped.append(Sample(fen=fen, vl=vl_sum / count))
+    return deduped, groups_merged
+
+
+def _finalize_dedupe_groups(
+    groups: dict[str, _DedupeAccum],
+    *,
+    load_workers: object = 1,
+    progress_every: int = 500_000,
+) -> tuple[list[Sample], int]:
+    items = list(groups.items())
+    total = len(items)
+    if total == 0:
+        return [], 0
+
+    workers, workers_label = parse_worker_count(load_workers, default_auto=False)
+    if workers <= 1 or total < 200_000:
+        deduped: list[Sample] = []
+        groups_merged = 0
+        for index, (_key, (fen, vl_sum, count)) in enumerate(items, start=1):
+            if count > 1:
+                groups_merged += 1
+            deduped.append(Sample(fen=fen, vl=vl_sum / count))
+            if progress_every > 0 and index % progress_every == 0:
+                print(
+                    f"[data]   dedupe average {index:,}/{total:,} unique FEN",
+                    flush=True,
+                )
+        return deduped, groups_merged
+
+    chunk_size = max(50_000, total // (workers * 4))
+    chunks = [items[i : i + chunk_size] for i in range(0, total, chunk_size)]
+    print(
+        f"[data]   dedupe average parallel: {len(chunks)} chunk(s), "
+        f"{workers_label} worker(s)",
+        flush=True,
+    )
+
+    deduped: list[Sample] = []
+    groups_merged = 0
+    completed = 0
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(_finalize_dedupe_chunk, chunk) for chunk in chunks]
+        for future in as_completed(futures):
+            chunk_samples, chunk_merged = future.result()
+            deduped.extend(chunk_samples)
+            groups_merged += chunk_merged
+            completed += 1
             print(
-                f"[data]   dedupe finalize {index:,}/{total:,} unique FEN",
+                f"[data]   dedupe averaged chunk {completed}/{len(chunks)}  "
+                f"samples={len(deduped):,}/{total:,}",
                 flush=True,
             )
     return deduped, groups_merged
@@ -93,7 +142,7 @@ def dedupe_samples_by_fen(
     load_workers: object = 1,
     progress_every: int = 1_000_000,
 ) -> tuple[list[Sample], dict[str, int]]:
-    """Merge duplicate positions; keep the median ``vl`` per FEN key."""
+    """Merge duplicate positions; keep the mean ``vl`` per FEN key."""
     if not samples:
         return [], {"before": 0, "after": 0, "removed": 0, "groups_merged": 0}
 
@@ -104,14 +153,15 @@ def dedupe_samples_by_fen(
         flush=True,
     )
 
-    groups: dict[str, tuple[str, list[float]]] = {}
+    groups: dict[str, _DedupeAccum] = {}
     if workers <= 1 or before < 200_000:
         for index, sample in enumerate(samples, start=1):
             key = fen_dedupe_key(sample.fen)
             if key not in groups:
-                groups[key] = (sample.fen, [sample.vl])
+                groups[key] = (sample.fen, sample.vl, 1)
             else:
-                groups[key][1].append(sample.vl)
+                fen, vl_sum, count = groups[key]
+                groups[key] = (fen, vl_sum + sample.vl, count + 1)
             if progress_every > 0 and index % progress_every == 0:
                 print(
                     f"[data]   dedupe grouped {index:,}/{before:,}  "
@@ -122,7 +172,7 @@ def dedupe_samples_by_fen(
         chunk_size = max(100_000, before // (workers * 4))
         chunks = [samples[i : i + chunk_size] for i in range(0, before, chunk_size)]
         print(
-            f"[data]   dedupe parallel: {len(chunks)} chunk(s), {workers} worker(s)",
+            f"[data]   dedupe group parallel: {len(chunks)} chunk(s), {workers} worker(s)",
             flush=True,
         )
         completed = 0
@@ -137,8 +187,12 @@ def dedupe_samples_by_fen(
                     flush=True,
                 )
 
-    print(f"[data]   dedupe computing median for {len(groups):,} unique FEN ...", flush=True)
-    deduped, groups_merged = _finalize_dedupe_groups(groups, progress_every=progress_every)
+    print(f"[data]   dedupe computing mean for {len(groups):,} unique FEN ...", flush=True)
+    deduped, groups_merged = _finalize_dedupe_groups(
+        groups,
+        load_workers=load_workers,
+        progress_every=progress_every,
+    )
     after = len(deduped)
     return deduped, {
         "before": before,
