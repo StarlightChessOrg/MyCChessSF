@@ -32,10 +32,12 @@ from labels import DEFAULT_MATE_THRESHOLD
 
 
 def log_train(message: str = "") -> None:
-    """Print without breaking active tqdm bars."""
+    """Print to stderr without breaking active tqdm bars."""
+    import sys
+
     from tqdm import tqdm
 
-    tqdm.write(message)
+    tqdm.write(message, file=sys.stderr)
 
 
 def format_epoch_summary(
@@ -60,9 +62,11 @@ def format_epoch_summary(
         f"  val_rmse_norm {val_metrics['rmse_norm']:.6f}",
         f"  val_mae_vl    {val_metrics['mae_vl']:.2f} (all)",
         f"  val_corr_vl   {val_metrics['corr_vl']:.4f} (all)",
-        f"  val_mae_quiet {val_metrics['mae_vl_quiet']:.2f}  corr {val_metrics['corr_vl_quiet']:.4f} "
+        f"  val_mae_quiet {val_metrics['mae_vl_quiet']:.2f}",
+        f"  val_corr_quiet {val_metrics['corr_vl_quiet']:.4f}  "
         f"(n={val_metrics['n_quiet']:,})",
-        f"  val_mate      skipped n={val_metrics['n_mate']:,} (|vl|>={val_metrics['mate_threshold']:.0f})",
+        f"  val_mate      skipped n={val_metrics['n_mate']:,}",
+        f"                (|vl|>={val_metrics['mate_threshold']:.0f})",
     ]
     if is_best:
         prev = "n/a" if not math.isfinite(best_val) else f"{best_val:.6f}"
@@ -192,6 +196,8 @@ def evaluate(
     desc: str = "val",
     use_tqdm: bool = True,
 ) -> dict[str, float]:
+    import sys
+
     import torch
     from tqdm import tqdm
 
@@ -217,6 +223,7 @@ def evaluate(
             unit="batch",
             leave=False,
             dynamic_ncols=True,
+            file=sys.stderr,
         )
         if use_tqdm
         else loader
@@ -291,6 +298,8 @@ def train_epoch(
     use_tqdm: bool = True,
     exclude_mate_from_loss: bool = True,
 ) -> float:
+    import sys
+
     from tqdm import tqdm
 
     model.train()
@@ -304,6 +313,7 @@ def train_epoch(
             unit="batch",
             leave=False,
             dynamic_ncols=True,
+            file=sys.stderr,
         )
         if use_tqdm
         else loader
@@ -404,14 +414,19 @@ def main() -> None:
     val_mate, val_quiet = count_mate_labels(val_samples, mate_threshold=mate_threshold)
     print(
         f"[label] mate zone |vl|>={mate_threshold:.0f}: "
-        f"train {train_mate:,}/{len(train_samples):,}  val {val_mate:,}/{len(val_samples):,}",
+        f"train {train_mate:,}/{len(train_samples):,}",
+        flush=True,
+    )
+    print(
+        f"[label]               val {val_mate:,}/{len(val_samples):,}",
         flush=True,
     )
     print(
         f"[label] mate handling: zscore_exclude={exclude_mate_from_zscore}  "
-        f"loss_exclude={exclude_mate_from_loss}  (inference uses PST in mate zone)",
+        f"loss_exclude={exclude_mate_from_loss}",
         flush=True,
     )
+    print("[label]               inference uses PST in mate zone", flush=True)
 
     print("[label] computing z-score stats ...", flush=True)
     label_mean, label_std = compute_zscore_stats(
@@ -460,10 +475,10 @@ def main() -> None:
         precomputed=precompute,
     )
     batch_size = int(train_cfg["batch_size"])
+    print(f"[loader] num_workers={num_workers_label}  batch_size={batch_size}", flush=True)
     print(
-        f"[loader] num_workers={num_workers_label}  batch_size={batch_size}  "
-        f"prefetch={train_cfg.get('prefetch_factor', 2)}  pin_memory={use_cuda}  "
-        f"storage={'csr' if precompute else 'samples'}",
+        f"[loader] prefetch={train_cfg.get('prefetch_factor', 2)}  "
+        f"pin_memory={use_cuda}  storage={'csr' if precompute else 'samples'}",
         flush=True,
     )
 
@@ -493,7 +508,7 @@ def main() -> None:
     ).to(device)
 
     param_count = sum(p.numel() for p in model.parameters())
-    print(f"[model] params={param_count:,}")
+    log_train(f"[model] params={param_count:,}")
 
     optimizer = torch.optim.Adam(
         model.parameters(),
@@ -508,13 +523,13 @@ def main() -> None:
     use_tqdm = bool(train_cfg.get("tqdm", True))
     epochs_without_improvement = 0
 
-    print(f"[train] max_epochs={max_epochs}  early_stopping_patience={patience}", flush=True)
+    log_train(f"[train] max_epochs={max_epochs}  early_stopping_patience={patience}")
     if precompute and num_workers == 0:
-        print(
+        log_train(
             "[train] precomputed CSR dataset uses num_workers=0 to avoid copying GB of RAM "
-            "into DataLoader worker processes (especially slow on Windows).",
-            flush=True,
+            "into DataLoader worker processes (especially slow on Windows)."
         )
+    log_train("")
 
     for epoch in range(1, max_epochs + 1):
         epoch_t0 = time.time()
@@ -572,40 +587,20 @@ def main() -> None:
         else:
             epochs_without_improvement += 1
 
-        if use_tqdm:
-            log_train(
-                format_epoch_summary(
-                    epoch=epoch,
-                    max_epochs=max_epochs,
-                    elapsed_s=epoch_elapsed,
-                    train_loss=train_loss,
-                    val_metrics=val_metrics,
-                    val_loss=val_loss,
-                    best_val=prev_best,
-                    is_best=is_best,
-                    epochs_without_improvement=epochs_without_improvement,
-                    patience=patience,
-                )
+        log_train(
+            format_epoch_summary(
+                epoch=epoch,
+                max_epochs=max_epochs,
+                elapsed_s=epoch_elapsed,
+                train_loss=train_loss,
+                val_metrics=val_metrics,
+                val_loss=val_loss,
+                best_val=prev_best,
+                is_best=is_best,
+                epochs_without_improvement=epochs_without_improvement,
+                patience=patience,
             )
-        else:
-            print(
-                f"epoch {epoch}/{max_epochs} done ({epoch_elapsed:.1f}s)  "
-                f"train_loss={train_loss:.6f}  val_loss={val_loss:.6f}  "
-                f"val_mae_norm={val_metrics['mae_norm']:.6f}  "
-                f"val_rmse_norm={val_metrics['rmse_norm']:.6f}  "
-                f"val_mae_quiet={val_metrics['mae_vl_quiet']:.2f}  "
-                f"val_corr_quiet={val_metrics['corr_vl_quiet']:.4f}  "
-                f"val_mate_skipped={val_metrics['n_mate']:,}",
-                flush=True,
-            )
-            if is_best:
-                print(f"  saved best.pt  val_loss={val_loss:.6f}", flush=True)
-            else:
-                print(
-                    f"  no val_loss improvement  "
-                    f"({epochs_without_improvement}/{patience})",
-                    flush=True,
-                )
+        )
 
         if not is_best and epochs_without_improvement >= patience:
             log_train(
