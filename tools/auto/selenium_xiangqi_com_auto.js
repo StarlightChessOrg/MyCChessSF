@@ -4,8 +4,7 @@
  * 依赖象眸 SF 桥接服务（Chess98 兼容 HTTP :9494）：
  *   mycchess-xiangqi-bridge --think-ms 1000
  *
- * 局面来源：localStorage['xiangqi.botGameState']（网页人机局权威状态，含 currentFen / moves[].uci）
- * 不再从 DOM 格子 diff 猜测对手着法。
+ * 局面来源：React Fiber gamePlayData（进行中）或 localStorage（仅 END 时写入）
  *
  * 环境变量（可选）：
  *   XIANGQI_URL         默认 https://play.xiangqi.com/computer
@@ -45,8 +44,8 @@ const {
   bridgeTokenToUci,
   uciToSquares,
   uciToSquareClass,
+  parseBridge4,
 } = require("./xiangqi_game_state")
-const { parseBridge4 } = require("./xiangqi_web_fen")
 
 const BRIDGE_BASE = `http://${BRIDGE_HOST}:${BRIDGE_PORT}`
 
@@ -153,7 +152,7 @@ async function botGameLoop(driver) {
   const gs = await readBotGameState(driver)
   if (!gs) return
 
-  const sig = `${gs.fen}|${gs.moveCount}|${gs.uciList.join(",")}`
+  const sig = `${gs.fen}|${gs.moveCount}|${gs.uciList.join(",")}|${gs.source}`
   if (lastGameState && lastGameState._sig === sig) return
 
   if (gs.moveCount === 0 && lastGameState && lastGameState.moveCount > 0) {
@@ -162,7 +161,7 @@ async function botGameLoop(driver) {
   }
 
   console.log(
-    `[auto] 局面 ply=${gs.moveCount} side=${gs.sideToMove} player=${gs.playerSide} last=${gs.lastUci || "-"}`
+    `[auto] 局面 ply=${gs.moveCount} side=${gs.sideToMove} player=${gs.playerSide} src=${gs.source || "?"} last=${gs.lastUci || "-"}`
   )
 
   const moveToken = await syncBridgeFen(gs.fen)
@@ -1020,19 +1019,22 @@ async function openXiangqiGame(driver) {
     console.warn("[auto] /computer 流程失败:", err.message || err)
     await openLegacyHome(driver)
   }
-  await syncWebBoardFromPage(driver)
   await resetBridgeSession()
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 40; i++) {
     lastGameState = await readBotGameState(driver)
     if (lastGameState) {
-      console.log(`[auto] botGameState OK ply=${lastGameState.moveCount} fen=${lastGameState.fen}`)
+      console.log(
+        `[auto] 局面就绪 source=${lastGameState.source} ply=${lastGameState.moveCount} side=${lastGameState.sideToMove} fen=${lastGameState.fen}`
+      )
       await syncBridgeFen(lastGameState.fen)
       break
     }
     await sleep(500)
   }
   if (!lastGameState) {
-    console.error("[auto] 无法读取 localStorage.xiangqi.botGameState，请确认已进入人机对局")
+    console.error(
+      "[auto] 无法读取局面（React Fiber / localStorage 均失败），请确认已进入人机对局"
+    )
   }
 }
 
