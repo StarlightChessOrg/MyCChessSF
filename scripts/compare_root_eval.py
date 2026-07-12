@@ -19,7 +19,7 @@ from mycchess_sf.fen_parse import FULL_INIT_FEN
 ckpt_path = ROOT / "nnue_training/checkpoints/full_gpu/best.pt"
 bin_path = ROOT / "data/nnue_model/quantized.xqnnue.bin"
 pt_path = ROOT / "data/nnue_model/quantized.xqint8.pt"
-data_path = Path("/mnt/c/Users/79315/Desktop/2/nnue_data/merged.txt")
+data_path = ROOT / "nnue_data/merged.txt"
 
 ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
 cfg = ckpt["config"]["model"]

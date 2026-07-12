@@ -62,6 +62,33 @@ mycchess-play-web --port 5151
 - **对弈**：红人黑机，可选开局库与音效 → [网页对弈](docs/web-play.md)
 - **NNUE**：自生成搜索分数据 → 训练 → INT8 → 搜索内评估 → [NNUE 总览](docs/nnue-overview.md)
 
+## NNUE 训练数据格式（`nnue_data/`）
+
+`xqwl_gen_nnue` 与训练脚本使用 **制表符分隔** 的文本，每行一条样本。标准格式为 **4 列**：
+
+```text
+FEN\t搜索分\tPST\tin_check
+```
+
+| 列 | 名称 | 说明 |
+|----|------|------|
+| 1 | FEN | 局面（含行棋方 `w` / `b`） |
+| 2 | 搜索分 | 根节点搜索标签（行棋方视角；NNUE 拟合目标） |
+| 3 | PST | 同一局面的 PST 静态分（行棋方视角） |
+| 4 | in_check | 行棋方是否被将军：`0` 否，`1` 是 |
+
+示例：
+
+```text
+rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1	8	3	0
+rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C4NC1/9/RNBAKAB1R b - - 0 1	-2	-6	0
+```
+
+- 数据目录默认 **`nnue_data/`**（仓库根下，gitignore）；单文件 `merged.txt` 或分块 `worker_*/chunk_*.txt`
+- 训练默认 **`quiet_only: true`**：用第 3/4 列过滤非静态局面（非将杀、未将军、\|搜索分 − PST\| ≤ 70 cp）
+- 旧版仅两列 `FEN\tvl` 需先在 WSL 补列：`bash scripts/augment_merged_wsl.sh /path/to/merged.txt nnue_data/merged.txt`  
+  详见 [NNUE 训练数据生成](docs/nnue-data-generation.md)
+
 ## 仓库概览
 
 核心目录：`cpp/`（引擎）、`mycchess_sf/`（网页对弈）、`nnue_training/` / `nnue_qINT8/`（NNUE 管线）、`data/`（开局库压缩包与部署用 NNUE 权重）。完整说明见 [项目结构](docs/project-structure.md)。

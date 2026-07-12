@@ -66,9 +66,7 @@ rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1	7	6	0
 ```bash
 cd /mnt/c/Users/79315/Desktop/2/MyCChessSF
 bash scripts/build_linux.sh   # 若尚未编译 xqwlight_core
-bash scripts/augment_merged_wsl.sh
-# 或自定义路径：
-# bash scripts/augment_merged_wsl.sh /path/to/merged.txt ./nnue_data/merged.txt
+bash scripts/augment_merged_wsl.sh /path/to/legacy_merged.txt nnue_data/merged.txt
 ```
 
 脚本多进程写入 **`MyCChessSF/nnue_data/merged.txt`**；训练配置 `full_gpu.yaml` 的 `data.source` 指向该目录。

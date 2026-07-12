@@ -2,33 +2,12 @@
 from __future__ import annotations
 
 import os
-import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
-from functools import lru_cache
-from pathlib import Path
 
 from labels import DEFAULT_MATE_THRESHOLD, is_mate_label
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
 MAX_AUTO_IO_WORKERS = 8
-_AUGMENT_SCRIPT = "scripts/augment_nnue_data_pst.py"
-
-
-def _ensure_xqwlight_on_path() -> None:
-    repo = str(_REPO_ROOT)
-    if repo not in sys.path:
-        sys.path.insert(0, repo)
-
-
-@lru_cache(maxsize=1)
-def _position_factory():
-    _ensure_xqwlight_on_path()
-    try:
-        from xqwlight_core import Position
-    except ImportError:
-        return None
-    return Position
 
 
 @dataclass(frozen=True)
@@ -38,7 +17,6 @@ class StaticFilterStats:
     mate_zone: int = 0
     in_check: int = 0
     pst_unstable: int = 0
-    bad_fen: int = 0
     no_metadata: int = 0
 
     @property
@@ -58,41 +36,29 @@ def _parse_workers(value: object) -> tuple[int, str]:
     return count, str(count)
 
 
-def _missing_metadata(sample: object) -> bool:
-    return sample.pst is None or sample.in_check is None
-
-
 def is_static_sample(
     sample: object,
     *,
     mate_threshold: float = DEFAULT_MATE_THRESHOLD,
     pst_margin: float = 70.0,
-    pos: object | None = None,
 ) -> tuple[bool, str]:
-    """Return ``(keep, reason)`` using PST/in_check columns when present."""
+    """Return ``(keep, reason)`` using PST/in_check columns from nnue_data."""
+    if sample.pst is None or sample.in_check is None:
+        return False, "no_metadata"
+
     if is_mate_label(sample.vl, threshold=mate_threshold):
         return False, "mate_zone"
 
-    if sample.in_check is True:
+    if sample.in_check:
         return False, "in_check"
 
-    pst = sample.pst
-    if pst is None:
-        if pos is None:
-            return False, "no_metadata"
-        if not pos.set_fen(sample.fen):
-            return False, "bad_fen"
-        if bool(pos.in_check()):
-            return False, "in_check"
-        pst = float(pos.evaluate())
-
-    if abs(float(sample.vl) - float(pst)) > pst_margin:
+    if abs(float(sample.vl) - float(sample.pst)) > pst_margin:
         return False, "pst_unstable"
 
     return True, "ok"
 
 
-def _filter_static_chunk_from_data(
+def _filter_static_chunk(
     chunk: list[tuple[str, float, float | None, bool | None]],
     *,
     mate_threshold: float,
@@ -103,7 +69,6 @@ def _filter_static_chunk_from_data(
         "mate_zone": 0,
         "in_check": 0,
         "pst_unstable": 0,
-        "bad_fen": 0,
         "no_metadata": 0,
     }
 
@@ -130,51 +95,16 @@ def _filter_static_chunk_from_data(
     return kept, counts
 
 
-def _filter_static_chunk_with_engine(
-    chunk: list[tuple[str, float, float | None, bool | None]],
-    *,
-    mate_threshold: float,
-    pst_margin: float,
-) -> tuple[list[tuple[str, float, float | None, bool | None]], dict[str, int]]:
-    factory = _position_factory()
-    if factory is None:
-        raise ImportError("xqwlight_core unavailable in worker process")
-    pos = factory()
-    kept: list[tuple[str, float, float | None, bool | None]] = []
-    counts = {
-        "mate_zone": 0,
-        "in_check": 0,
-        "pst_unstable": 0,
-        "bad_fen": 0,
-        "no_metadata": 0,
-    }
-
-    class _Row:
-        __slots__ = ("fen", "vl", "pst", "in_check")
-
-        def __init__(self, fen: str, vl: float, pst: float | None, in_check: bool | None) -> None:
-            self.fen = fen
-            self.vl = vl
-            self.pst = pst
-            self.in_check = in_check
-
-    for fen, vl, pst, in_check in chunk:
-        row = _Row(fen, vl, pst, in_check)
-        ok, reason = is_static_sample(
-            row,
-            mate_threshold=mate_threshold,
-            pst_margin=pst_margin,
-            pos=pos if _missing_metadata(row) else None,
+def _require_metadata_columns(samples: list) -> None:
+    missing = sum(1 for s in samples if s.pst is None or s.in_check is None)
+    if missing:
+        raise ValueError(
+            f"quiet_only requires 4-column nnue_data (FEN\\tsearch\\tpst\\tin_check); "
+            f"{missing:,}/{len(samples):,} rows missing PST or in_check. "
+            f"Augment legacy files in WSL:\n"
+            f"  bash scripts/augment_merged_wsl.sh /path/to/merged.txt nnue_data/merged.txt\n"
+            f"See docs/nnue-data-generation.md and README.md."
         )
-        if ok:
-            kept.append((fen, vl, pst, in_check))
-        else:
-            counts[reason] += 1
-    return kept, counts
-
-
-def _samples_use_data_columns(samples: list) -> bool:
-    return bool(samples) and not any(_missing_metadata(s) for s in samples)
 
 
 def filter_static_samples(
@@ -184,37 +114,25 @@ def filter_static_samples(
     pst_margin: float = 70.0,
     load_workers: object = "auto",
 ) -> tuple[list, StaticFilterStats]:
-    """Keep only static-position samples (PST/in_check from data columns when present)."""
+    """Keep only static-position samples using PST/in_check from data columns."""
     from data.dataset import Sample
 
     stats = StaticFilterStats(before=len(samples))
     if not samples:
         return samples, stats
 
-    use_data = _samples_use_data_columns(samples)
-    if not use_data:
-        if _position_factory() is None:
-            raise ImportError(
-                "quiet_only requires PST/in_check columns in training data. "
-                f"Augment legacy FEN\\tvl files first:\n"
-                f"  python {_AUGMENT_SCRIPT} --input /path/to/merged.txt "
-                f"--output nnue_data/merged.txt\n"
-                "(run in WSL after scripts/build_linux.sh; see docs/nnue-data-generation.md)"
-            )
+    _require_metadata_columns(samples)
 
     workers, workers_label = _parse_workers(load_workers)
     tuples = [(s.fen, s.vl, s.pst, s.in_check) for s in samples]
-    source = "data columns" if use_data else "xqwlight_core fallback"
     print(
-        f"[data] static filter: {stats.before:,} samples ({source}, workers={workers_label}, "
+        f"[data] static filter: {stats.before:,} samples (workers={workers_label}, "
         f"pst_margin={pst_margin:.0f}) ...",
         flush=True,
     )
 
-    filter_fn = _filter_static_chunk_from_data if use_data else _filter_static_chunk_with_engine
-
     if workers <= 1 or len(tuples) < 50_000:
-        kept_tuples, counts = filter_fn(
+        kept_tuples, counts = _filter_static_chunk(
             tuples,
             mate_threshold=mate_threshold,
             pst_margin=pst_margin,
@@ -231,13 +149,12 @@ def filter_static_samples(
             "mate_zone": 0,
             "in_check": 0,
             "pst_unstable": 0,
-            "bad_fen": 0,
             "no_metadata": 0,
         }
         with ProcessPoolExecutor(max_workers=workers) as pool:
             futures = [
                 pool.submit(
-                    filter_fn,
+                    _filter_static_chunk,
                     chunk,
                     mate_threshold=mate_threshold,
                     pst_margin=pst_margin,
@@ -259,7 +176,6 @@ def filter_static_samples(
     stats.mate_zone = counts["mate_zone"]
     stats.in_check = counts["in_check"]
     stats.pst_unstable = counts["pst_unstable"]
-    stats.bad_fen = counts["bad_fen"]
     stats.no_metadata = counts["no_metadata"]
     kept = [
         Sample(fen=fen, vl=vl, pst=pst, in_check=in_check)
@@ -276,8 +192,6 @@ def format_static_filter_stats(stats: StaticFilterStats) -> str:
         f"check={stats.in_check:,}",
         f"pst={stats.pst_unstable:,}",
     ]
-    if stats.bad_fen:
-        parts.append(f"bad_fen={stats.bad_fen:,}")
     if stats.no_metadata:
         parts.append(f"no_metadata={stats.no_metadata:,}")
     return " ".join(parts)

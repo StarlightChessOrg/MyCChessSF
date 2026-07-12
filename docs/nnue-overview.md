@@ -8,7 +8,7 @@
 xqwl_gen_nnue          nnue_training/           nnue_qINT8/              cpp/
      │                      │                      │                    │
      ▼                      ▼                      ▼                    ▼
- FEN + vl 文本  ──►  浮点 PyTorch 训练  ──►  INT8 量化 + 校准  ──►  .xqnnue.bin
+ FEN + search/PST/in_check  ──►  浮点 PyTorch 训练  ──►  INT8 量化 + 校准  ──►  .xqnnue.bin
  (nnue_data/)         (checkpoints/)          (output/)          load_nnue()
 ```
 
@@ -27,7 +27,7 @@ xqwl_gen_nnue          nnue_training/           nnue_qINT8/              cpp/
 |------|-----|
 | 特征 | XQWL-PSQ，1260 维稀疏（己方/对方 × 7 子力 × 90 格） |
 | 结构 | FT（EmbeddingBag）→ L1=512 → FC 512→32 → FC 64→32 → FC 64→1 |
-| 标签 | 搜索分 `vl`，z-score 归一化（mean/std 写入 checkpoint 与 bin） |
+| 标签 | 搜索分（第 2 列），z-score 归一化（mean/std 写入 checkpoint 与 bin） |
 | 推理 | FT int32 累加器 + 增量更新；FC 纯 int8 点积 + per-layer input scale |
 
 ## 快速命令

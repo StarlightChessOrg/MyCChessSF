@@ -25,7 +25,7 @@ if ! python3 -c "import xqwlight_core" 2>/dev/null; then
   fi
 fi
 
-INPUT="${1:-/mnt/c/Users/79315/Desktop/2/nnue_data/merged.txt}"
+INPUT="${1:?usage: $0 INPUT [OUTPUT]}"
 OUTPUT="${2:-$ROOT/nnue_data/merged.txt}"
 
 mkdir -p "$(dirname "$OUTPUT")"

@@ -28,7 +28,7 @@ MyCChessSF/
 │   ├── README.md
 │   ├── compressed_files/         开局库与 openbook 压缩包（构建时解压 book.7z）
 │   └── nnue_model/               INT8 NNUE 权重（打包源 → deployment/model/）
-├── nnue_data/                    xqwl_gen_nnue 输出（FEN\tvl，通常不入库）
+├── nnue_data/                    xqwl_gen_nnue 输出（FEN\tsearch\tPST\tin_check，通常不入库）
 ├── nnue_training/                浮点 NNUE PyTorch 训练
 ├── nnue_qINT8/                   INT8 量化 + .xqnnue.bin 导出
 ├── third_party/                  外部参考 git submodule，调研用，不参与编译
@@ -69,7 +69,7 @@ MyCChessSF/
 | `tmps/` | 开发者本地 scratch。可将 `best.pt` 等 checkpoint 复制到此，跑 `nnue_qINT8/quantize.py` 或推理冒烟；`*.pt` 已在 `.gitignore`，不入库。说明见 `tmps/README.md` |
 | `deployment/` | `bash scripts/build_linux.sh` 生成的**可部署目录**（`lib/`、`bin/`、`db/`、`model/`）。已在 `.gitignore`；[GitHub Releases](https://github.com/StarlightChessOrg/MyCChessSF/releases/latest) 上的 tar 包即此目录的打包 |
 | `dist/` | `bash scripts/make_release.sh <版本>` 输出的 `MyCChessSF-v*-linux-x86_64-py*.tar.gz` 及 `.sha256`。已在 `.gitignore` |
-| `nnue_data/` | `xqwl_gen_nnue` 生成的训练语料（`FEN\tvl` 文本），体积大，通常不入库 |
+| `nnue_data/` | `xqwl_gen_nnue` 生成的训练语料（4 列 TSV，见 README），体积大，通常不入库 |
 | 根目录 `xqwlight_core*.so` / `xqwl_gen_nnue` | 编译产物拷贝，便于 `PYTHONPATH=.` 测试；`.gitignore` 忽略 |
 
 ## 发布相关
