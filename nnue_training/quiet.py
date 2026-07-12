@@ -58,13 +58,13 @@ def is_static_sample(
     return True, "ok"
 
 
-def _filter_static_chunk(
-    chunk: list[tuple[str, float, float | None, bool | None]],
-    *,
+def _filter_static_chunk_impl(
+    chunk: list[tuple[str, float, float, bool]],
     mate_threshold: float,
     pst_margin: float,
-) -> tuple[list[tuple[str, float, float | None, bool | None]], dict[str, int]]:
-    kept: list[tuple[str, float, float | None, bool | None]] = []
+) -> tuple[list[tuple[str, float, float, bool]], dict[str, int]]:
+    """Module-level worker for ProcessPoolExecutor (Windows spawn-safe)."""
+    kept: list[tuple[str, float, float, bool]] = []
     counts = {
         "mate_zone": 0,
         "in_check": 0,
@@ -72,27 +72,31 @@ def _filter_static_chunk(
         "no_metadata": 0,
     }
 
-    class _Row:
-        __slots__ = ("fen", "vl", "pst", "in_check")
-
-        def __init__(self, fen: str, vl: float, pst: float | None, in_check: bool | None) -> None:
-            self.fen = fen
-            self.vl = vl
-            self.pst = pst
-            self.in_check = in_check
-
     for fen, vl, pst, in_check in chunk:
-        row = _Row(fen, vl, pst, in_check)
-        ok, reason = is_static_sample(
-            row,
-            mate_threshold=mate_threshold,
-            pst_margin=pst_margin,
-        )
-        if ok:
-            kept.append((fen, vl, pst, in_check))
-        else:
-            counts[reason] += 1
+        if is_mate_label(vl, threshold=mate_threshold):
+            counts["mate_zone"] += 1
+            continue
+        if in_check:
+            counts["in_check"] += 1
+            continue
+        if abs(float(vl) - float(pst)) > pst_margin:
+            counts["pst_unstable"] += 1
+            continue
+        kept.append((fen, vl, pst, in_check))
+
     return kept, counts
+
+
+def _filter_static_chunk_job(
+    job: tuple[list[tuple[str, float, float, bool]], float, float],
+) -> tuple[list[tuple[str, float, float, bool]], dict[str, int]]:
+    chunk, mate_threshold, pst_margin = job
+    return _filter_static_chunk_impl(chunk, mate_threshold, pst_margin)
+
+
+# Stable import names for Windows spawn (do not rename without keeping aliases).
+_filter_static_chunk = _filter_static_chunk_job
+_filter_static_chunk_from_data = _filter_static_chunk_job
 
 
 def _require_metadata_columns(samples: list) -> None:
@@ -124,7 +128,9 @@ def filter_static_samples(
     _require_metadata_columns(samples)
 
     workers, workers_label = _parse_workers(load_workers)
-    tuples = [(s.fen, s.vl, s.pst, s.in_check) for s in samples]
+    tuples: list[tuple[str, float, float, bool]] = [
+        (s.fen, s.vl, float(s.pst), bool(s.in_check)) for s in samples
+    ]
     print(
         f"[data] static filter: {stats.before:,} samples (workers={workers_label}, "
         f"pst_margin={pst_margin:.0f}) ...",
@@ -132,10 +138,10 @@ def filter_static_samples(
     )
 
     if workers <= 1 or len(tuples) < 50_000:
-        kept_tuples, counts = _filter_static_chunk(
+        kept_tuples, counts = _filter_static_chunk_impl(
             tuples,
-            mate_threshold=mate_threshold,
-            pst_margin=pst_margin,
+            mate_threshold,
+            pst_margin,
         )
     else:
         chunk_size = max(25_000, len(tuples) // (workers * 4))
@@ -151,16 +157,9 @@ def filter_static_samples(
             "pst_unstable": 0,
             "no_metadata": 0,
         }
+        jobs = [(chunk, mate_threshold, pst_margin) for chunk in chunks]
         with ProcessPoolExecutor(max_workers=workers) as pool:
-            futures = [
-                pool.submit(
-                    _filter_static_chunk,
-                    chunk,
-                    mate_threshold=mate_threshold,
-                    pst_margin=pst_margin,
-                )
-                for chunk in chunks
-            ]
+            futures = [pool.submit(_filter_static_chunk_job, job) for job in jobs]
             for completed, future in enumerate(as_completed(futures), start=1):
                 chunk_kept, chunk_counts = future.result()
                 kept_tuples.extend(chunk_kept)
@@ -172,16 +171,19 @@ def filter_static_samples(
                     flush=True,
                 )
 
-    stats.after = len(kept_tuples)
-    stats.mate_zone = counts["mate_zone"]
-    stats.in_check = counts["in_check"]
-    stats.pst_unstable = counts["pst_unstable"]
-    stats.no_metadata = counts["no_metadata"]
+    out_stats = StaticFilterStats(
+        before=stats.before,
+        after=len(kept_tuples),
+        mate_zone=counts["mate_zone"],
+        in_check=counts["in_check"],
+        pst_unstable=counts["pst_unstable"],
+        no_metadata=counts["no_metadata"],
+    )
     kept = [
         Sample(fen=fen, vl=vl, pst=pst, in_check=in_check)
         for fen, vl, pst, in_check in kept_tuples
     ]
-    return kept, stats
+    return kept, out_stats
 
 
 def format_static_filter_stats(stats: StaticFilterStats) -> str:
@@ -195,3 +197,8 @@ def format_static_filter_stats(stats: StaticFilterStats) -> str:
     if stats.no_metadata:
         parts.append(f"no_metadata={stats.no_metadata:,}")
     return " ".join(parts)
+
+
+if __name__ == "__main__":
+    # Windows spawn imports this module in child processes; keep executable block minimal.
+    pass
