@@ -28,9 +28,27 @@ XQWL 版权见 elephantbase.net；本仓库见根目录 [LICENSE](../LICENSE)。
 | 脚本 | 用途 |
 |------|------|
 | `scripts/build_linux.sh` | 编译 + `pip install -e .` |
+| `scripts/make_release.sh` | 打包 `dist/MyCChessSF-v*-.tar.gz`（见下方 Release） |
 | `scripts/test_nnue_wsl.py` | C++ / Python NNUE 对比 |
 | `scripts/fetch_xqwl_assets.py` | 下载网页 UI 资源 |
 | `scripts/regen_extract_en.py` | 维护用：规则抽取相关 |
+
+## Release 发布
+
+```bash
+# 本地打包（需 Linux / WSL）
+bash scripts/make_release.sh 0.1.0
+# 产物：dist/MyCChessSF-v0.1.0-linux-x86_64-py3.13.tar.gz + .sha256
+```
+
+推送版本标签后，GitHub Actions 会自动构建并发布 Release：
+
+```bash
+git tag -a v0.1.0 -m "MyCChessSF v0.1.0"
+git push origin v0.1.0
+```
+
+Release 说明见仓库根目录 `RELEASE_NOTES_v*.md`。
 
 ## 提交前检查
 
