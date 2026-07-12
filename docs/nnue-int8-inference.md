@@ -56,8 +56,9 @@ Python 参考：`QuantizedNNUE.forward_norm_int8()`（`int8_nnue.py`）。
 
 | 组件 | 说明 |
 |------|------|
-| FT 累加器 | int32 列累加，**双视角** `acc[0]`/`acc[1]`（红/黑特征编码） |
-| 增量更新 | 搜索 `MakeMove`/`UndoMakeMove` 维护累加器；评估只读 `acc[sdPlayer]` |
+| FT 累加器 | int32 列累加，**单视角增量**（每步更新 `acc[1-sdPlayer]`，`acc_valid[]` lazy refresh） |
+| 增量更新 | 搜索 `MakeMove`/`UndoMakeMove` 维护累加器；排序/探测不触发 NNUE |
+| 评估模式 | 内部节点 Raw；根/QSearch Full（含 PST 将杀修正） |
 | FC | 纯 int8×uint8 点积 + input scale |
 | SIMD | 运行时派发：Scalar / **NEON**（ARM）/ **AVX2** / **AVX512-VNNI**（独立 TU） |
 | 将杀修正 | PST 极大时采用 PST；将军/大分歧时与 PST 混合 |
@@ -107,5 +108,6 @@ PYTHONPATH=. python3 scripts/test_nnue_wsl.py
 
 ## 相关文档
 
+- [引擎算法技术](engine-algorithms.md) — 搜索、剪枝、staticEval、NNUE 集成
 - [NNUE 管线总览](nnue-overview.md)
 - [NNUE 架构调研（Pikafish）](nnue_pikafish_research.md)

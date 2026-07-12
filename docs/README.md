@@ -9,6 +9,10 @@
 - [开局库](opening-book.md)
 - [项目结构](project-structure.md)
 
+## 引擎算法
+
+- [引擎算法技术](engine-algorithms.md) — 搜索、NNUE 推理、staticEval 剪枝、PST
+
 ## NNUE 管线
 
 - [NNUE 管线总览](nnue-overview.md)

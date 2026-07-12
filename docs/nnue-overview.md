@@ -49,8 +49,9 @@ cd .. && PYTHONPATH=. python3 scripts/test_nnue_wsl.py
 
 ## 搜索中的行为
 
-- 加载 NNUE 后，搜索 / 静态评估使用 `evaluate_vl`（含将杀附近 PST 修正）
+- 加载 NNUE 后，根节点 / QSearch 停着用 `evaluate_vl`（Full）；内部节点用 `evaluate_vl_raw`（Raw）
 - 空着剪枝仍用 PST 子力（`NullOkay()`）
-- 双视角 FT 累加器：维护红/黑两种特征编码，评估时只读 `acc[sdPlayer]`，**不是**算两遍最终分数
+- **单视角 FT 累加器**：每步只更新走子后视角；`acc_valid[]` lazy refresh；评估只读 `acc[sdPlayer]`
+- TT 缓存 `staticEval`，并驱动 razoring / futility / LMP 等剪枝
 
-细节见 [INT8 量化与 C++ 推理](nnue-int8-inference.md)。
+细节见 [引擎算法技术](engine-algorithms.md) 与 [INT8 量化与 C++ 推理](nnue-int8-inference.md)。

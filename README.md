@@ -26,6 +26,12 @@ mycchess-play-web --port 5151
 | [开局库](docs/opening-book.md) | `BOOK.DAT`、命令行与 API 开关 |
 | [项目结构](docs/project-structure.md) | 目录说明、与 MyCChessRL 的区别 |
 
+### 引擎算法
+
+| 文档 | 说明 |
+|------|------|
+| [引擎算法技术](docs/engine-algorithms.md) | 搜索框架、NNUE 增量推理、staticEval 剪枝、PST |
+
 ### NNUE 管线
 
 | 文档 | 说明 |

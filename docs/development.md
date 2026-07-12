@@ -42,4 +42,5 @@ cd .. && PYTHONPATH=. python3 scripts/test_nnue_wsl.py
 
 ## 文档索引
 
-返回 [README 文档索引](../README.md#文档)。
+- [引擎算法技术](engine-algorithms.md)
+- 返回 [README 文档索引](../README.md#文档)

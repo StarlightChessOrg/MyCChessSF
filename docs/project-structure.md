@@ -11,7 +11,7 @@ MyCChessSF/
 │   │   ├── xqwl_extract.inc      规则、走法、PST 评估
 │   │   ├── xqwl_preeval*.inc     动态 PST 混合
 │   │   ├── xqwl_search.inc       Alpha-Beta 搜索 + 开局库 hook
-│   │   ├── xqwl_nnue.inc         INT8 NNUE 推理 + 双视角累加器
+│   │   ├── xqwl_nnue.inc         INT8 NNUE 推理 + 单视角 FT 累加器
 │   │   └── xqwl_fen.inc          内联 FEN 编解码
 │   ├── bindings.cpp              pybind11 Python 绑定
 │   ├── gen_nnue_main.cpp         NNUE 训练数据生成器
@@ -55,4 +55,4 @@ MyCChessSF/
 | MyCChessRL | XQWL 局面核 | PyTorch / MCTS |
 | **MyCChessSF** | 同上 | **原版小巫师 Alpha-Beta + 开局库 + 可选 NNUE** |
 
-MyCChessSF 的 NNUE 训练特征采用 **XQWL-PSQ**（1260 维）；Pikafish HalfKA 调研见 [NNUE 架构调研（Pikafish）](nnue_pikafish_research.md)（仅供参考，当前管线未启用）。
+算法细节见 [引擎算法技术](engine-algorithms.md)。NNUE 训练特征采用 **XQWL-PSQ**（1260 维）；Pikafish HalfKA 调研见 [NNUE 架构调研（Pikafish）](nnue_pikafish_research.md)（仅供参考，当前管线未启用）。
