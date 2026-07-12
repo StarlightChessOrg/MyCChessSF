@@ -1,6 +1,6 @@
 # 快速开始
 
-MyCChessSF 的目标平台是 **Linux**：在此编译 `xqwlight_core.so`（Python 扩展）与 `xqwl_gen_nnue`（NNUE 数据生成器）。
+**象眸 SF**（*Iris SF*）的目标平台是 **Linux**：在此编译 `xqwlight_core.so`（Python 扩展）与 `xqwl_gen_nnue`（NNUE 数据生成器）。
 
 ## 依赖
 

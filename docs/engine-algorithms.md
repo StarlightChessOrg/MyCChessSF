@@ -1,6 +1,6 @@
 # 引擎算法技术
 
-本文档单独介绍 MyCChessSF 的 **搜索、评估、NNUE 推理** 等核心算法，与 [NNUE 管线总览](nnue-overview.md)（训练/量化/部署流程）互补。
+本文档单独介绍 **象眸 SF**（*Iris SF*）的 **搜索、评估、NNUE 推理** 等核心算法，与 [NNUE 管线总览](nnue-overview.md)（训练/量化/部署流程）互补。
 
 ## 总览
 
@@ -31,7 +31,7 @@
 
 ## 搜索框架
 
-基于 **象棋小巫师 XQWL 0.6** 的 `SearchMain → SearchRoot → SearchFull → SearchQuiesc` 递归结构，在保持兼容性的前提下叠加若干现代技巧。
+基于 **象棋小巫师 XQWL 0.6** 的 `SearchMain → SearchRoot → SearchFull → SearchQuiesc` 递归结构（象眸 SF 的搜索骨架），在保持兼容性的前提下叠加若干现代技巧。
 
 ### 核心常量（节选）
 

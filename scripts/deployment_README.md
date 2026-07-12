@@ -1,4 +1,4 @@
-# MyCChessSF 部署包
+# 象眸 SF 部署包 · Iris SF
 
 本目录由 `bash scripts/build_linux.sh` 自动生成，可直接拷贝到 Linux 服务器使用。
 
@@ -20,7 +20,7 @@ deployment/
     └── quantized.xqnnue.bin   INT8 NNUE 权重（来自 data/nnue_model/）
 ```
 
-## 网页对弈（人类 vs 小巫师）
+## 网页对弈（人类 vs 象眸）
 
 ```bash
 pip install -r deployment/requirements.txt

@@ -1,4 +1,4 @@
-# MyCChessSF 文档
+# 象眸 SF 文档 · Iris SF
 
 完整索引见仓库根目录 [README.md](../README.md#文档)。
 

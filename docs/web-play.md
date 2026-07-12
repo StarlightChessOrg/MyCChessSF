@@ -1,5 +1,7 @@
 # 网页对弈
 
+**象眸 SF**（*Iris SF*）浏览器对弈入口：`mycchess-play-web`。
+
 ## 部署包内启动（无需 pip install -e .）
 
 若已运行 `bash scripts/build_linux.sh` 生成 `deployment/`：
@@ -22,7 +24,7 @@ mycchess-play-web --no-book-default        # 启动时默认不用开局库
 ## 默认对局设置
 
 - **红方**：人类
-- **黑方**：象棋小巫师（Alpha-Beta + 可选开局库）
+- **黑方**：象眸引擎（脱胎小巫师 Alpha-Beta + 可选开局库 + NNUE）
 
 ## 界面与资源
 
@@ -34,7 +36,7 @@ mycchess-play-web --no-book-default        # 启动时默认不用开局库
 
 | 选项 | 说明 |
 |------|------|
-| 小巫师使用开局库 | 见 [开局库](opening-book.md) |
+| 引擎使用开局库 | 侧栏文案仍为「小巫师使用开局库」（XQWL 遗留 UI）；见 [开局库](opening-book.md) |
 | 音效 | 走子 / 吃子 / 将军 / 胜负等，与 Win32 一致 |
 
 ## Python API（搜索）

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mycchess-sf"
 version = "0.1.0"
-description = "XQWL06 xiangqi engine (.so) and web human-vs-wizard play"
+description = "象眸 SF (Iris SF): XQWL-rooted xiangqi engine with NNUE and web play"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

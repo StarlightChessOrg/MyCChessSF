@@ -1,6 +1,11 @@
-# MyCChessSF
+# 象眸 SF · Iris SF
 
-在浏览器里和 **象棋小巫师（XQWL 0.6）** 对弈：规则核 + Alpha-Beta 搜索来自 `XQWL06.CPP`，网页棋盘 / 棋子 / 音效复用 Win32 原版资源。可选 **NNUE** 静态评估（拟合小巫师搜索分，INT8 增量推理 + SIMD）。
+> 脱胎象棋小巫师（XQWL 0.6），融合 INT8 NNUE、现代搜索与网页对弈。  
+> *Elephant Iris — xiangqi engine rooted in XQWL, sharpened with neural eval.*
+
+在浏览器中与 **象眸** 对弈：规则核 + Alpha-Beta 搜索来自 `XQWL06.CPP`，网页棋盘 / 棋子 / 音效复用 Win32 原版资源；可选 **NNUE** 静态评估（拟合小巫师搜索分，INT8 增量推理 + SIMD）。
+
+GitHub 仓库名仍为 [MyCChessSF](https://github.com/StarlightChessOrg/MyCChessSF)（历史路径，与包名 `mycchess-sf` 一致）。
 
 **目标平台：Linux**（编译 `xqwlight_core.so` 与 `xqwl_gen_nnue`）。
 

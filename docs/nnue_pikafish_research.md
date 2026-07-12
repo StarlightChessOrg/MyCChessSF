@@ -1,4 +1,4 @@
-# Pikafish NNUE 架构调研与 MyCChessSF 训练建议
+# Pikafish NNUE 架构调研与象眸 SF 训练建议
 
 > 调研日期：2026-07-11  
 > 源码位于 **`third_party/Pikafish`**（[official-pikafish/Pikafish](https://github.com/official-pikafish/Pikafish) git submodule；克隆后 `git submodule update --init --recursive`）。  
@@ -6,7 +6,7 @@
 
 ## 1. 背景与目标
 
-MyCChessSF 已通过 `xqwl_gen_nnue` 生成 **FEN + 搜索评分（vl）** 监督数据，下一步是训练 **NNUE（Efficiently Updatable Neural Network）** 评估函数。
+**象眸 SF**（*Iris SF*）已通过 `xqwl_gen_nnue` 生成 **FEN + 搜索评分（vl）** 监督数据，下一步是训练 **NNUE（Efficiently Updatable Neural Network）** 评估函数。
 
 NNUE 的核心约束：
 
@@ -228,7 +228,7 @@ for i in removed_features: acc_new -= W[i]
 for i in added_features:   acc_new += W[i]
 ```
 
-仅 Feature Transformer 与后续 FC 在需要时重算。这比 MyCChessSF 当前「每局面完整搜索」快几个数量级，也是 NNUE 能替代手工评估的关键。
+仅 Feature Transformer 与后续 FC 在需要时重算。这比象眸 SF 当前「每局面完整搜索」快几个数量级，也是 NNUE 能替代手工评估的关键。
 
 ---
 
@@ -251,7 +251,7 @@ Pikafish 训练数据来自 [Pika Xiangqi Zero](https://github.com/official-pika
 
 ---
 
-## 8. 与 MyCChessSF 数据管线的对接
+## 8. 与象眸 SF 数据管线的对接
 
 ### 8.1 当前数据格式
 
@@ -266,7 +266,7 @@ Pikafish 训练数据来自 [Pika Xiangqi Zero](https://github.com/official-pika
 
 ### 8.2 标签对齐
 
-| Pikafish 输出 | MyCChessSF 标签 | 对齐方式 |
+| Pikafish 输出 | 象眸 SF 标签 | 对齐方式 |
 |---------------|-----------------|----------|
 | 内部量化 → cp | `vl`（厘兵值） | 训练时线性缩放至 `[-1,1]` 或定点整数 |
 | 行棋方视角 | 行棋方视角 | **已一致**，可直接作回归目标 |
@@ -291,12 +291,12 @@ FEN → Position 对象 → HalfKAv2_hm / FullThreats 特征索引
 可选路径：
 
 1. **复用 Pikafish 源码** 中的特征提取（推荐，保证与推理一致）。
-2. **移植到 MyCChessSF C++**（长期，便于与 `xqwlight_core` 集成）。
+2. **移植到象眸 SF C++**（长期，便于与 `xqwlight_core` 集成）。
 3. **Python 复现特征**（仅适合原型，难保证 SIMD 路径一致）。
 
 ---
 
-## 9. 推荐的 MyCChessSF NNUE 模型结构
+## 9. 推荐的象眸 SF NNUE 模型结构
 
 为兼顾 **训练可行性**、**SIMD 推理** 与 **后续引擎集成**，建议分阶段：
 
@@ -378,7 +378,7 @@ Loss: MSE(pred_cp, target_cp)  或 Huber
 
 ```mermaid
 gantt
-    title MyCChessSF NNUE 建议路线
+    title 象眸 SF NNUE 建议路线
     dateFormat YYYY-MM
     section 数据
     xqwl_gen_nnue 千万局面     :done, 2026-07, 2026-08
@@ -427,7 +427,7 @@ gantt
   → FC(128→1) → cp
 ```
 
-**MyCChessSF 已有数据（FEN + XQWL 搜索分）可充当 NNUE 训练标签**；缺口主要在 **FEN → Pikafish 特征索引** 的提取链路与 **量化导出 / SIMD 推理** 代码。
+**象眸 SF 已有数据（FEN + XQWL 搜索分）可充当 NNUE 训练标签**；缺口主要在 **FEN → Pikafish 特征索引** 的提取链路与 **量化导出 / SIMD 推理** 代码。
 
 建议 **先实现阶段 A（HalfKA-only，L1=1024，L2=L3=32）** 验证整条管线，再补齐 FullThreats 以达到 Pikafish 同级网络容量。
 

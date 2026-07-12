@@ -1,5 +1,7 @@
 # 项目结构
 
+仓库目录（GitHub：`MyCChessSF`；产品名：**象眸 SF / Iris SF**）：
+
 ```
 MyCChessSF/
 ├── cpp/                          C++ 核心
@@ -92,6 +94,6 @@ bash scripts/make_release.sh 0.1.0
 | 项目 | 规则核 | AI |
 |------|--------|-----|
 | MyCChessRL | XQWL 局面核 | PyTorch / MCTS |
-| **MyCChessSF** | 同上 | **原版小巫师 Alpha-Beta + 开局库 + 可选 NNUE** |
+| **象眸 SF** | 同上 | **脱胎小巫师 Alpha-Beta + 开局库 + NNUE（Iris SF）** |
 
 算法细节见 [引擎算法技术](engine-algorithms.md)。NNUE 训练特征采用 **XQWL-PSQ**（1260 维）；Pikafish HalfKA 调研见 [NNUE 架构调研（Pikafish）](nnue_pikafish_research.md)（仅供参考，当前管线未启用）。
