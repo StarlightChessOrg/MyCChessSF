@@ -183,6 +183,73 @@ async function syncWebBoardFromPage(driver) {
   console.log("[auto] 已从网页同步棋盘状态")
 }
 
+function diffBoardMove(before, after) {
+  let from = null
+  let to = null
+  for (let i = 0; i < 10; i++) {
+    for (let j = 0; j < 9; j++) {
+      if (before[i][j] === 1 && after[i][j] === 0) from = { x1: i, y1: j }
+      if (before[i][j] === 0 && after[i][j] === 1) to = { x2: i, y2: j }
+    }
+  }
+  if (!from || !to) return null
+  return { x1: from.x1, y1: from.y1, x2: to.x2, y2: to.y2 }
+}
+
+function isValidMove(move) {
+  return (
+    move &&
+    move.x1 >= 0 &&
+    move.x1 <= 9 &&
+    move.y1 >= 0 &&
+    move.y1 <= 8 &&
+    move.x2 >= 0 &&
+    move.x2 <= 9 &&
+    move.y2 >= 0 &&
+    move.y2 <= 8 &&
+    !(move.x1 === move.x2 && move.y1 === move.y2)
+  )
+}
+
+async function waitForOpponentBoard(driver, sinceBoard, timeoutMs = 45000) {
+  const since = sinceBoard.toString()
+  const deadline = Date.now() + timeoutMs
+  console.log("[auto] 等待相弈应手…")
+  while (Date.now() < deadline) {
+    const cur = await readWebBoard(driver)
+    if (cur.toString() !== since) return cur
+    await sleep(250)
+  }
+  throw new Error("等待相弈应手超时")
+}
+
+async function waitForBridgeEngineMove(prevToken, timeoutMs = 90000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const raw = (await httpGet("/computer")).trim()
+    if (raw === "null" || raw === "____") {
+      await sleep(300)
+      continue
+    }
+    const digits = raw.replace(/\D/g, "")
+    const data = digits.length >= 4 ? digits.slice(-4) : digits
+    if (data.length === 4 && data !== "0000" && data !== prevToken) {
+      console.log(`[auto] 桥接下一着就绪 -> '${data}'`)
+      return data
+    }
+    await sleep(300)
+  }
+  console.warn("[auto] 桥接下一着等待超时，继续轮询")
+}
+
+async function resolveOpponentMove(driver, before, after) {
+  const diff = diffBoardMove(before, after)
+  if (isValidMove(diff)) return diff
+  const legacy = await getWebMove(driver, before, after)
+  if (isValidMove(legacy)) return legacy
+  return null
+}
+
 async function findGridSquare(driver, row, col, preferPiece = true) {
   const rowSel = `#game-grid > div:nth-child(${row}) > div:nth-child(${col})`
   const variants = []
@@ -436,6 +503,7 @@ async function getEngineMove(driver) {
   const data = digits.length >= 4 ? digits.slice(-4) : digits
   if (data !== engineLastMove && data.length === 4 && data !== "0000") {
     console.log("[auto] 引擎着法", data)
+    const playedToken = data
     engineLastMove = data
     try {
       await doMoveOnWeb(driver)
@@ -444,19 +512,26 @@ async function getEngineMove(driver) {
       return
     }
 
-    const waitBoardChange = async () => {
-      const currentBoard = await readWebBoard(driver)
-      if (currentBoard.toString() !== webLastBoard.toString()) return
-      await sleep(200)
-      await waitBoardChange()
+    const boardAfterEngine = webLastBoard
+    let boardAfterOpponent
+    try {
+      boardAfterOpponent = await waitForOpponentBoard(driver, boardAfterEngine)
+    } catch (err) {
+      console.error("[auto]", err.message || err)
+      webLastBoard = await readWebBoard(driver)
+      return
     }
-    await waitBoardChange()
 
-    const currentBoard = await readWebBoard(driver)
-    const move = await getWebMove(driver, webLastBoard, currentBoard)
+    const move = await resolveOpponentMove(driver, boardAfterEngine, boardAfterOpponent)
+    if (!isValidMove(move)) {
+      console.error("[auto] 无法解析相弈应手，重新同步棋盘", move)
+      webLastBoard = boardAfterOpponent
+      return
+    }
     console.log("[auto] 相弈应手", move)
-    webLastBoard = currentBoard
+    webLastBoard = boardAfterOpponent
     await sendOpponentMove(move)
+    await waitForBridgeEngineMove(playedToken)
     state++
     console.log("==========================")
   } else {
@@ -480,8 +555,7 @@ async function doMoveOnWeb(driver, attempt = 0) {
     throw new Error(`网页走子失败已达 ${MAX_ATTEMPTS} 次: ${engineLastMove}`)
   }
 
-  webLastBoard[iccsY1][iccsX1] = 0
-  webLastBoard[iccsY2][iccsX2] = 1
+  const beforeBoard = await readWebBoard(driver)
 
   let start
   let end
@@ -489,8 +563,6 @@ async function doMoveOnWeb(driver, attempt = 0) {
     start = await findMoveTarget(driver, from, true)
     end = await findMoveTarget(driver, to, false)
   } catch (err) {
-    webLastBoard[iccsY1][iccsX1] = 1
-    webLastBoard[iccsY2][iccsX2] = 0
     console.error("[auto] 定位格子失败:", err.message || err)
     await sleep(500)
     return doMoveOnWeb(driver, attempt + 1)
@@ -510,15 +582,17 @@ async function doMoveOnWeb(driver, attempt = 0) {
 
   await driver.executeScript("arguments[0].style.outline='';", start)
   await driver.executeScript("arguments[0].style.outline='';", end)
-  await sleep(400)
+  await sleep(600)
 
-  if ((await readWebBoard(driver)).toString() !== webLastBoard.toString()) {
-    webLastBoard[iccsY1][iccsX1] = 1
-    webLastBoard[iccsY2][iccsX2] = 0
+  const afterBoard = await readWebBoard(driver)
+  if (afterBoard.toString() === beforeBoard.toString()) {
     console.error("[auto] 网页着法失败，重试")
     await sleep(400)
     return doMoveOnWeb(driver, attempt + 1)
   }
+
+  webLastBoard = afterBoard
+  console.log("[auto] 网页着法成功，棋盘已同步")
 }
 
 async function getWebBoardFromPieces(driver) {
@@ -564,6 +638,9 @@ async function getWebBoard(driver) {
 }
 
 async function getWebMove(_driver, lastBoard, currentBoard) {
+  const diff = diffBoardMove(lastBoard, currentBoard)
+  if (isValidMove(diff)) return diff
+
   const move = { x1: -1, y1: -1, x2: -1, y2: -1 }
   for (let i = 0; i < lastBoard.length; i++) {
     for (let j = 0; j < lastBoard[i].length; j++) {
@@ -573,19 +650,26 @@ async function getWebMove(_driver, lastBoard, currentBoard) {
       }
     }
   }
-  const elements = await _driver.findElements(By.css(".pieces-container > div"))
+  const elements = await _driver.findElements(By.css(".pieces-container > div[r]"))
   let moved = { x: -1, index: -1 }
   const pieces = []
   for (const el of elements) {
-    const elChild = await el.findElement(By.css(".pieces-container > div > div > div"))
+    let elChild
+    try {
+      elChild = await el.findElement(By.css(":scope > div > div > div"))
+    } catch {
+      continue
+    }
     const rowNum = 11 - Number(await el.getAttribute("r"))
     pieces[rowNum] = pieces[rowNum] || []
     pieces[rowNum].push(el)
-    if ((await elChild.getAttribute("class")).match("moved-piece")) {
+    const cls = await elChild.getAttribute("class")
+    if (cls && cls.includes("moved-piece")) {
       moved.x = rowNum
       moved.index = pieces[rowNum].length - 1
     }
   }
+  if (moved.x < 1) return move
   move.x2 = moved.x - 1
   let count = 0
   for (const k in currentBoard[moved.x - 1]) {
