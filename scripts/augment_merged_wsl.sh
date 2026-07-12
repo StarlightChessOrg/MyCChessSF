@@ -14,10 +14,8 @@ if [[ ! -f scripts/build_linux.sh ]]; then
 fi
 
 if ! python3 -c "import xqwlight_core" 2>/dev/null; then
-  shopt -s nullglob
-  build_sos=("$ROOT"/cpp/build/xqwlight_core*.so)
-  if ((${#build_sos[@]})); then
-    cp -f "${build_sos[@]}" "$ROOT/"
+  if ls "$ROOT"/cpp/build/xqwlight_core*.so >/dev/null 2>&1; then
+    cp -f "$ROOT"/cpp/build/xqwlight_core*.so "$ROOT/"
   else
     echo "[augment] building xqwlight_core ..."
     PYTHON="${PYTHON:-python3}" bash scripts/build_linux.sh || {
