@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Augment workspace merged.txt with PST/in_check and install under MyCChessSF/nnue_data/.
+if [ -z "${BASH_VERSION:-}" ]; then
+  exec /usr/bin/env bash "$0" "$@"
+fi
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -11,8 +14,10 @@ if [[ ! -f scripts/build_linux.sh ]]; then
 fi
 
 if ! python3 -c "import xqwlight_core" 2>/dev/null; then
-  if compgen -G "$ROOT/cpp/build/xqwlight_core"*.so >/dev/null; then
-    cp -f "$ROOT"/cpp/build/xqwlight_core*.so "$ROOT/"
+  shopt -s nullglob
+  build_sos=("$ROOT"/cpp/build/xqwlight_core*.so)
+  if ((${#build_sos[@]})); then
+    cp -f "${build_sos[@]}" "$ROOT/"
   else
     echo "[augment] building xqwlight_core ..."
     PYTHON="${PYTHON:-python3}" bash scripts/build_linux.sh || {
