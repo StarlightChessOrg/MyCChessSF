@@ -26,7 +26,7 @@ def evaluate_models(
     }
 
     for batch in loader:
-        indices, offsets, targets_norm, targets_raw, _is_mate = batch
+        indices, offsets, targets_norm, targets_raw, _is_mate, *_ = batch
         indices = indices.to(device)
         offsets = offsets.to(device)
         targets_norm = targets_norm.to(device)

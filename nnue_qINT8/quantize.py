@@ -96,7 +96,7 @@ def parity_report(
     float_model.eval()
     abs_err: list[float] = []
     for batch in loader:
-        indices, offsets, _targets_norm, _targets_raw, _is_mate = batch
+        indices, offsets, _targets_norm, _targets_raw, _is_mate, *_ = batch
         indices = indices.to(device)
         offsets = offsets.to(device)
         pred_float = float_model(indices, offsets) * label_std + label_mean
